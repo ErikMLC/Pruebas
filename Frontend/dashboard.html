@@ -67,6 +67,44 @@
                     </div>
 
 
+                    <!-- ✅ AGREGAR DESPUÉS del db-selector en dashboard.html -->
+
+                    <!-- Panel de Colecciones -->
+                    <div class="collections-panel" id="collections-panel" style="display: none;">
+                        <div class="panel-header">
+                            <h4><i class="fas fa-table"></i> Colecciones Disponibles</h4>
+                            <span class="connection-status" id="connection-status">
+                                <i class="fas fa-circle connected"></i>
+                                <span id="connected-db-name">db_restaurants</span>
+                            </span>
+                        </div>
+                        
+                        <div class="collections-list-container">
+                            <div class="collections-search">
+                                <i class="fas fa-search"></i>
+                                <input type="text" id="collections-search" placeholder="Buscar colección..." class="search-input-small">
+                            </div>
+                            
+                            <ul id="collections-list" class="collections-list">
+                                <li class="loading-collections">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <span>Cargando colecciones...</span>
+                                </li>
+                            </ul>
+                            
+                            <div class="collections-actions">
+                                <button id="refresh-collections" class="btn-secondary-small">
+                                    <i class="fas fa-sync-alt"></i>
+                                    Actualizar
+                                </button>
+                                <button id="disconnect-db" class="btn-secondary-small">
+                                    <i class="fas fa-unlink"></i>
+                                    Desconectar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="history-section">
                         <h4>Historial:</h4>
                         <ul id="query-history" class="history-list">

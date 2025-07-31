@@ -158,124 +158,150 @@ class LoginApp {
     }
   }
 
+  // ✅ SOLUCIÓN: Reemplazar executeRedirect() en main.js
+
   /**
-   * 🚀 REDIRECCIÓN INMEDIATA Y MÚLTIPLE
+   * 🎯 REDIRECCIÓN INTELIGENTE según el role del usuario
    */
   executeRedirect() {
-    console.log('🚀 === EJECUTANDO REDIRECCIÓN INMEDIATA ===');
-    
-    // Verificar token antes de redireccionar
-    const token = storage.getToken();
-    if (!token) {
-      console.error('❌ CRÍTICO: No hay token para redireccionar');
-      ui.showToast('Error: Sesión no guardada', 'error');
-      return;
-    }
-    
-    console.log('✅ Token verificado, procediendo con redirección...');
-    
-    try {
-      // 🎯 MÉTODO 1: Redirección directa inmediata
-      console.log('1️⃣ Intentando redirección directa...');
-      window.location.href = 'dashboard.html';
+      console.log('🚀 === EJECUTANDO REDIRECCIÓN INTELIGENTE ===');
       
-      // 🎯 MÉTODO 2: Fallback inmediato con replace
-      console.log('2️⃣ Ejecutando fallback con replace...');
-      window.location.replace('dashboard.html');
+      // Verificar token antes de redireccionar
+      const token = storage.getToken();
+      if (!token) {
+          console.error('❌ CRÍTICO: No hay token para redireccionar');
+          ui.showToast('Error: Sesión no guardada', 'error');
+          return;
+      }
       
-      // 🎯 MÉTODO 3: Fallback con assign
-      console.log('3️⃣ Ejecutando fallback con assign...');
-      window.location.assign('dashboard.html');
+      // ✅ NUEVO: Obtener datos del usuario para verificar role
+      const userData = storage.getUserData();
+      console.log('👤 Datos del usuario:', userData);
       
-      // 🎯 MÉTODO 4: Último fallback
-      console.log('4️⃣ Último fallback...');
-      window.location = 'dashboard.html';
+      // ✅ CRÍTICO: Detectar si es admin
+      const isAdmin = userData?.role === 'admin' || userData?.role === 'administrator';
+      console.log('🔒 ¿Es administrador?', isAdmin);
       
-    } catch (error) {
-      console.error('💥 ERROR EN TODOS LOS MÉTODOS DE REDIRECCIÓN:', error);
+      // ✅ DECIDIR REDIRECCIÓN según role
+      let targetPage;
+      if (isAdmin) {
+          targetPage = 'admin-dashboard.html';
+          console.log('🛡️ Redirigiendo a panel de ADMINISTRADOR');
+      } else {
+          targetPage = 'dashboard.html';
+          console.log('👤 Redirigiendo a dashboard de USUARIO');
+      }
       
-      // 🆘 MÉTODO DE EMERGENCIA: Crear enlace manual
-      this.createManualRedirectLink();
-    }
+      try {
+          // 🎯 MÉTODO 1: Redirección directa inmediata
+          console.log(`1️⃣ Redirigiendo a: ${targetPage}`);
+          window.location.href = targetPage;
+          
+          // 🎯 MÉTODO 2: Fallback inmediato con replace
+          console.log(`2️⃣ Fallback con replace a: ${targetPage}`);
+          window.location.replace(targetPage);
+          
+          // 🎯 MÉTODO 3: Fallback con assign
+          console.log(`3️⃣ Fallback con assign a: ${targetPage}`);
+          window.location.assign(targetPage);
+          
+          // 🎯 MÉTODO 4: Último fallback
+          console.log(`4️⃣ Último fallback a: ${targetPage}`);
+          window.location = targetPage;
+          
+      } catch (error) {
+          console.error('💥 ERROR EN TODOS LOS MÉTODOS DE REDIRECCIÓN:', error);
+          
+          // 🆘 MÉTODO DE EMERGENCIA: Crear enlace manual
+          this.createManualRedirectLink(targetPage, isAdmin);
+      }
   }
 
   /**
    * 🆘 Método de emergencia si la redirección falla
    */
-  createManualRedirectLink() {
-    console.log('🆘 Creando enlace manual de emergencia...');
-    
-    // Crear overlay con enlace manual
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.9);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 999999;
-      color: white;
-      font-family: Arial, sans-serif;
-    `;
-    
-    const userData = storage.getUserData();
-    
-    overlay.innerHTML = `
-      <div style="text-align: center; padding: 40px; background: #1a1a1a; border-radius: 15px; max-width: 500px;">
-        <h2 style="color: #4CAF50; margin-bottom: 20px;">
-          🎉 ¡Login Exitoso!
-        </h2>
-        <p style="margin-bottom: 15px;">
-          <strong>Usuario:</strong> ${userData?.username || 'Cargado'}
-        </p>
-        <p style="margin-bottom: 30px;">
-          Tu sesión se guardó correctamente.
-        </p>
-        
-        <div style="margin: 30px 0;">
-          <h3 style="color: #ff9800; margin-bottom: 15px;">
-            ⚠️ Redirección automática falló
-          </h3>
-          <p style="margin-bottom: 20px;">
-            Haz clic en el botón para acceder al dashboard:
-          </p>
-        </div>
-        
-        <button 
-          onclick="window.location.href='dashboard.html'" 
-          style="
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            border-radius: 8px;
-            cursor: pointer;
-            margin: 10px;
-            width: 200px;
-            display: block;
-            margin: 10px auto;
-          "
-          onmouseover="this.style.opacity='0.9'"
-          onmouseout="this.style.opacity='1'"
-        >
-          🚀 Ir al Dashboard
-        </button>
-        
-        <div style="margin-top: 30px; font-size: 14px; color: #666;">
-          <p>Si el botón no funciona, verifica que dashboard.html existe en tu proyecto.</p>
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(overlay);
-    
-    // También mostrar toast con instrucciones
-    ui.showToast('Redirección manual creada. Haz clic en el botón.', 'info', 10000);
+  createManualRedirectLink(targetPage, isAdmin) {
+      console.log('🆘 Creando enlace manual de emergencia...');
+      
+      // Crear overlay con enlace manual
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.9);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 999999;
+          color: white;
+          font-family: Arial, sans-serif;
+      `;
+      
+      const userData = storage.getUserData();
+      const roleText = isAdmin ? 'ADMINISTRADOR' : 'USUARIO';
+      const bgColor = isAdmin ? '#dc2626' : '#1e40af';
+      
+      overlay.innerHTML = `
+          <div style="text-align: center; padding: 40px; background: #1a1a1a; border-radius: 15px; max-width: 500px;">
+              <h2 style="color: ${bgColor}; margin-bottom: 20px;">
+                  🎉 ¡Login Exitoso como ${roleText}!
+              </h2>
+              <p style="margin-bottom: 15px;">
+                  <strong>Usuario:</strong> ${userData?.username || 'Cargado'}
+              </p>
+              <p style="margin-bottom: 15px;">
+                  <strong>Role:</strong> ${userData?.role || 'user'}
+              </p>
+              <p style="margin-bottom: 30px;">
+                  Tu sesión se guardó correctamente.
+              </p>
+              
+              <div style="margin: 30px 0;">
+                  <h3 style="color: #ff9800; margin-bottom: 15px;">
+                      ⚠️ Redirección automática falló
+                  </h3>
+                  <p style="margin-bottom: 20px;">
+                      Haz clic en el botón para acceder al ${isAdmin ? 'panel de administración' : 'dashboard'}:
+                  </p>
+              </div>
+              
+              <button 
+                  onclick="window.location.href='${targetPage}'" 
+                  style="
+                      background: linear-gradient(135deg, ${bgColor} 0%, ${isAdmin ? '#b91c1c' : '#1e3a8a'} 100%);
+                      color: white;
+                      border: none;
+                      padding: 15px 30px;
+                      font-size: 18px;
+                      border-radius: 8px;
+                      cursor: pointer;
+                      margin: 10px;
+                      width: 250px;
+                      display: block;
+                      margin: 10px auto;
+                  "
+                  onmouseover="this.style.opacity='0.9'"
+                  onmouseout="this.style.opacity='1'"
+              >
+                  ${isAdmin ? '🛡️ Ir al Panel Admin' : '🚀 Ir al Dashboard'}
+              </button>
+              
+              <div style="margin-top: 30px; font-size: 14px; color: #666;">
+                  <p>Si el botón no funciona, verifica que ${targetPage} existe en tu proyecto.</p>
+              </div>
+          </div>
+      `;
+      
+      document.body.appendChild(overlay);
+      
+      // También mostrar toast con instrucciones
+      const message = isAdmin ? 
+          'Redirección manual creada para ADMIN. Haz clic en el botón.' : 
+          'Redirección manual creada para USER. Haz clic en el botón.';
+      ui.showToast(message, 'info', 10000);
   }
 
   // Resto de métodos sin cambios...

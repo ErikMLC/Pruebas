@@ -215,8 +215,9 @@ export const adminMain = {
         console.log('📊 Estadísticas calculadas:', this.state.stats);
     },
     
+
     /**
-     * Actualiza el dashboard con las estadísticas
+     * ✅ CORREGIR: Actualiza el dashboard con las estadísticas
      */
     updateDashboard() {
         const stats = this.state.stats;
@@ -230,23 +231,38 @@ export const adminMain = {
         this.updateElement('active-users-dashboard', stats.activeUsers);
         this.updateElement('admin-users-dashboard', stats.adminUsers);
         
-        // Actualizar porcentajes de permisos
+        // ✅ CORREGIDO: Actualizar porcentajes de permisos con nombres correctos
+        const permissionMappings = {
+            'select': 'select',
+            'insert': 'insert', 
+            'update': 'update',
+            'delete': 'delete',
+            'create_table': 'create',     // ✅ MAPEAR: create_table -> create
+            'drop_table': 'drop'          // ✅ MAPEAR: drop_table -> drop
+        };
+        
         Object.entries(stats.permissions).forEach(([perm, count]) => {
             const percentage = stats.totalUsers > 0 ? Math.round((count / stats.totalUsers) * 100) : 0;
             
+            // ✅ USAR MAPEO CORRECTO
+            const htmlId = permissionMappings[perm] || perm;
+            
             // Actualizar contadores
-            this.updateElement(`${perm.replace('_', '-')}-users-count`, count);
-            this.updateElement(`${perm.replace('_', '-')}-percentage-text`, `${percentage}% del total`);
+            this.updateElement(`${htmlId}-users-count`, count);
+            this.updateElement(`${htmlId}-percentage-text`, `${percentage}% del total`);
             
             // Actualizar barras de progreso
-            const bar = document.getElementById(`${perm.replace('_', '-')}-percentage-bar`);
+            const bar = document.getElementById(`${htmlId}-percentage-bar`);
             if (bar) {
                 bar.style.width = `${percentage}%`;
             }
+            
+            console.log(`📊 ${perm} -> ${htmlId}: ${count} usuarios (${percentage}%)`);
         });
         
-        console.log('📊 Dashboard actualizado');
+        console.log('📊 Dashboard actualizado correctamente');
     },
+
     
     /**
      * Actualiza texto de un elemento

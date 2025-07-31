@@ -252,7 +252,24 @@ class UserModel:
             logger.error(f"Error actualizando contraseña: {str(e)}")
             return False
 
-    
+        
+    def delete_user(self, user_id):
+        """
+        Elimina un usuario permanentemente de la base de datos.
+        
+        Args:
+            user_id (str): ID del usuario a eliminar
+            
+        Returns:
+            bool: True si se eliminó exitosamente
+        """
+        try:
+            result = self.collection.delete_one({"_id": ObjectId(user_id)})
+            return result.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error eliminando usuario {user_id}: {e}")
+            return False
+
     def get_user_by_email(self, email):
         """
         Obtiene un usuario por su email.

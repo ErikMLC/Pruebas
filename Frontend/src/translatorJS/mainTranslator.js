@@ -268,8 +268,9 @@ export const mainTranslator = {
         console.log('🔐 Permisos disponibles para ejemplos:', permissions);
     },
     
+
     /**
-     * Conecta a la base de datos seleccionada
+     * ✅ ACTUALIZAR: Conecta a la base de datos seleccionada
      */
     async connectToDatabase() {
         try {
@@ -294,8 +295,10 @@ export const mainTranslator = {
             this.state.isConnected = true;
             this.state.currentCollections = collections;
             
+            // ✅ MOSTRAR PANEL DE COLECCIONES
+            this.showCollectionsPanel(selectedDB, collections);
+            
             // Actualizar interfaz
-            this.updateCollectionsList(collections);
             this.updateTranslateButton();
             
             this.ui?.showToast(`✅ Conectado a ${selectedDB}`, 'success');
@@ -307,17 +310,40 @@ export const mainTranslator = {
             this.showLoading(false);
         }
     },
-    
+
+
     /**
-     * Actualiza la lista de colecciones en la interfaz
-     * @param {Array} collections - Lista de colecciones
+     * ✅ NUEVO: Muestra el panel de colecciones
+     */
+    showCollectionsPanel(databaseName, collections) {
+        const panel = document.getElementById('collections-panel');
+        const dbNameEl = document.getElementById('connected-db-name');
+        
+        if (panel && dbNameEl) {
+            // Actualizar nombre de BD
+            dbNameEl.textContent = databaseName;
+            
+            // Mostrar panel
+            panel.style.display = 'block';
+            
+            // Actualizar lista de colecciones
+            this.updateCollectionsList(collections);
+            
+            // Configurar eventos del panel
+            this.bindCollectionsEvents();
+        }
+    },
+    
+
+    /**
+     * ✅ ACTUALIZAR: Actualiza la lista de colecciones
      */
     updateCollectionsList(collections) {
         const list = document.getElementById('collections-list');
         if (!list) return;
         
         if (!collections || collections.length === 0) {
-            list.innerHTML = '<li class="no-collections">No hay colecciones</li>';
+            list.innerHTML = '<li class="no-collections"><i class="fas fa-table"></i> No hay colecciones</li>';
             return;
         }
         
@@ -326,19 +352,98 @@ export const mainTranslator = {
             const li = document.createElement('li');
             li.className = 'collection-item';
             li.innerHTML = `<i class="fas fa-table"></i> ${collection}`;
-            li.style.cursor = 'pointer';
-            li.title = `Click para insertar "${collection}" en el editor`;
+            li.title = `Click para usar "${collection}" en el editor`;
             
             // Event listener para insertar nombre en editor
             li.addEventListener('click', () => {
-                this.insertCollectionName(collection);
+                this.selectCollection(collection, li);
             });
             
             list.appendChild(li);
         });
         
-        console.log(`📁 ${collections.length} colecciones cargadas`);
+        console.log(`📁 ${collections.length} colecciones cargadas en panel`);
     },
+
+
+    /**
+     * ✅ NUEVO: Selecciona una colección
+     */
+    selectCollection(collectionName, element) {
+        // Remover selección anterior
+        document.querySelectorAll('.collection-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        
+        // Seleccionar nueva
+        element.classList.add('selected');
+        
+        // Insertar en editor
+        this.insertCollectionName(collectionName);
+        
+        this.ui?.showToast(`📁 Colección "${collectionName}" seleccionada`, 'success');
+    },
+
+    /**
+     * ✅ NUEVO: Configurar eventos del panel de colecciones
+     */
+    bindCollectionsEvents() {
+        // Buscar colecciones
+        const searchInput = document.getElementById('collections-search');
+        searchInput?.addEventListener('input', (e) => {
+            this.filterCollections(e.target.value);
+        });
+        
+        // Actualizar colecciones
+        const refreshBtn = document.getElementById('refresh-collections');
+        refreshBtn?.addEventListener('click', () => {
+            this.refreshCollections();
+        });
+        
+        // Desconectar
+        const disconnectBtn = document.getElementById('disconnect-db');
+        disconnectBtn?.addEventListener('click', () => {
+            this.disconnectDatabase();
+        });
+    },
+
+    /**
+     * ✅ NUEVO: Filtrar colecciones
+     */
+    filterCollections(searchTerm) {
+        const items = document.querySelectorAll('.collection-item');
+        const term = searchTerm.toLowerCase();
+        
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(term) ? 'flex' : 'none';
+        });
+    },
+
+    /**
+     * ✅ NUEVO: Desconectar base de datos
+     */
+    disconnectDatabase() {
+        const panel = document.getElementById('collections-panel');
+        if (panel) {
+            panel.style.display = 'none';
+        }
+        
+        // Resetear estado
+        this.state.currentDatabase = null;
+        this.state.isConnected = false;
+        this.state.currentCollections = [];
+        
+        // Resetear selector
+        const dbSelect = document.getElementById('database-select');
+        if (dbSelect) {
+            dbSelect.value = '';
+        }
+        
+        this.updateTranslateButton();
+        this.ui?.showToast('📤 Desconectado de la base de datos', 'info');
+    },
+
     
     /**
      * Ejecuta la consulta SQL ingresada por el usuario

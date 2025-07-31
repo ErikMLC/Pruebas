@@ -1,8 +1,9 @@
-// tabs.js - Sistema de pestañas del dashboard (< 60 líneas)
-// Maneja navegación entre Traductor SQL y Perfil
+// src/dashboardJS/tabs.js - Sistema de pestañas INTELIGENTE
+// Compatible con dashboard.html y admin-dashboard.html
 
 export const tabsManager = {
-    currentTab: 'translator',
+    currentTab: null,
+    availableTabs: [],
     
     /**
      * Inicializa el sistema de pestañas
@@ -10,10 +11,36 @@ export const tabsManager = {
     init() {
         console.log('🗂️ Inicializando pestañas...');
         
+        // ✅ CORREGIDO: Detectar pestañas disponibles dinámicamente
+        this.detectAvailableTabs();
+        
         this.bindEvents();
-        this.showTab('translator'); // Pestaña por defecto
+        
+        // ✅ CORREGIDO: Mostrar primera pestaña disponible
+        if (this.availableTabs.length > 0) {
+            this.showTab(this.availableTabs[0]);
+        }
         
         console.log('✅ Pestañas inicializadas');
+    },
+    
+    /**
+     * ✅ NUEVO: Detecta qué pestañas están disponibles en la página actual
+     */
+    detectAvailableTabs() {
+        const tabButtons = document.querySelectorAll('.tab-btn[data-tab]');
+        this.availableTabs = [];
+        
+        tabButtons.forEach(button => {
+            const tabId = button.getAttribute('data-tab');
+            const tabContent = document.getElementById(`${tabId}-tab`);
+            
+            if (tabContent) {
+                this.availableTabs.push(tabId);
+            }
+        });
+        
+        console.log('📋 Pestañas disponibles:', this.availableTabs);
     },
     
     /**
@@ -32,10 +59,16 @@ export const tabsManager = {
     
     /**
      * Muestra una pestaña específica
-     * @param {string} tabId - ID de la pestaña ('translator' o 'profile')
+     * @param {string} tabId - ID de la pestaña
      */
     showTab(tabId) {
         console.log(`🗂️ Cambiando a: ${tabId}`);
+        
+        // ✅ CORREGIDO: Verificar que la pestaña existe antes de cambiar
+        if (!this.availableTabs.includes(tabId)) {
+            console.warn(`⚠️ Pestaña '${tabId}' no disponible. Pestañas válidas:`, this.availableTabs);
+            return false;
+        }
         
         // Remover clases activas
         document.querySelectorAll('.tab-btn').forEach(btn => 
@@ -58,8 +91,12 @@ export const tabsManager = {
             this.currentTab = tabId;
             
             this.dispatchTabChangeEvent(tabId, previousTab);
+            
+            console.log(`✅ Pestaña '${tabId}' activada`);
+            return true;
         } else {
-            console.error(`❌ Pestaña no encontrada: ${tabId}`);
+            console.error(`❌ Elementos de pestaña '${tabId}' no encontrados`);
+            return false;
         }
     },
     
@@ -70,7 +107,7 @@ export const tabsManager = {
      */
     dispatchTabChangeEvent(tabId, previousTab) {
         const event = new CustomEvent('tabChanged', {
-            detail: { tabId, previousTab }
+            detail: { tabId, previousTab, availableTabs: this.availableTabs }
         });
         document.dispatchEvent(event);
     },
@@ -90,5 +127,42 @@ export const tabsManager = {
      */
     isTabActive(tabId) {
         return this.currentTab === tabId;
+    },
+    
+    /**
+     * ✅ NUEVO: Obtiene lista de pestañas disponibles
+     * @returns {Array} - Array de IDs de pestañas disponibles
+     */
+    getAvailableTabs() {
+        return [...this.availableTabs];
+    },
+    
+    /**
+     * ✅ NUEVO: Verifica si una pestaña específica existe
+     * @param {string} tabId - ID de la pestaña
+     * @returns {boolean} - True si existe
+     */
+    tabExists(tabId) {
+        return this.availableTabs.includes(tabId);
+    },
+    
+    /**
+     * ✅ NUEVO: Cambia a pestaña con fallback
+     * @param {string} preferredTab - Pestaña preferida
+     * @param {string} fallbackTab - Pestaña fallback
+     */
+    showTabWithFallback(preferredTab, fallbackTab = null) {
+        if (this.tabExists(preferredTab)) {
+            return this.showTab(preferredTab);
+        } else if (fallbackTab && this.tabExists(fallbackTab)) {
+            console.log(`⚠️ Pestaña '${preferredTab}' no existe, usando fallback '${fallbackTab}'`);
+            return this.showTab(fallbackTab);
+        } else if (this.availableTabs.length > 0) {
+            console.log(`⚠️ Usando primera pestaña disponible: '${this.availableTabs[0]}'`);
+            return this.showTab(this.availableTabs[0]);
+        } else {
+            console.error('❌ No hay pestañas disponibles');
+            return false;
+        }
     }
 };
