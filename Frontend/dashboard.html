@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Dashboard - Traductor MongoDB</title>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="src/styles/dashboard.css">
+    
+    <!-- Font Awesome para iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="dashboard-header">
+        <div class="header-left">
+            <i class="fas fa-database"></i>
+            <h1>SQL Dashboard</h1>
+        </div>
+        
+        <div class="header-right">
+            <span class="user-info">
+                <i class="fas fa-user-circle"></i>
+                <span id="username">Cargando...</span>
+            </span>
+            <button id="logout-btn" class="logout-btn">
+                <i class="fas fa-sign-out-alt"></i>
+                Salir
+            </button>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="dashboard-tabs">
+        <button class="tab-btn active" data-tab="translator">
+            <i class="fas fa-exchange-alt"></i>
+            Traductor SQL
+        </button>
+        <button class="tab-btn" data-tab="profile">
+            <i class="fas fa-user"></i>
+            Perfil
+        </button>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="dashboard-content">
+        
+        <!-- Tab: Traductor SQL -->
+        <section id="translator-tab" class="tab-content active">
+            <div class="translator-container">
+                
+                <!-- Panel Izquierdo: Base de datos -->
+                <aside class="db-panel">
+                    <div class="panel-header">
+                        <h3><i class="fas fa-server"></i> Base de Datos</h3>
+                    </div>
+                    
+                    <div class="db-selector">
+                        <label for="database-select">Seleccionar BD:</label>
+                        <select id="database-select" class="db-select">
+                            <option value="">-- Seleccionar --</option>
+                        </select>
+                        <button id="connect-btn" class="btn-connect" disabled>
+                            <i class="fas fa-link"></i> Conectar
+                        </button>
+                    </div>
+
+
+                    <div class="history-section">
+                        <h4>Historial:</h4>
+                        <ul id="query-history" class="history-list">
+                            <li class="no-history">Sin consultas recientes</li>
+                        </ul>
+                    </div>
+                </aside>
+
+                <!-- Panel Central: Editor y Resultados -->
+                <div class="main-panel">
+                    
+                    <!-- Editor SQL -->
+                    <div class="editor-section">
+                        <div class="editor-header">
+                            <h3><i class="fas fa-code"></i> Editor SQL</h3>
+                            <div class="editor-actions">
+                                <button id="clear-btn" class="btn-secondary">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                                <button id="example-btn" class="btn-secondary">
+                                    <i class="fas fa-lightbulb"></i> Ejemplo
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <textarea 
+                            id="sql-editor" 
+                            class="sql-editor" 
+                            placeholder="Escribe tu consulta SQL aquí...&#10;&#10;Ejemplo:&#10;SELECT * FROM users WHERE age > 25 LIMIT 10;"
+                            rows="8"
+                        ></textarea>
+                        
+                        <div class="editor-footer">
+                            <button id="translate-btn" class="btn-primary" disabled>
+                                <i class="fas fa-play"></i>
+                                Traducir y Ejecutar
+                            </button>
+                            <button id="save-query-btn" class="btn-secondary">
+                                <i class="fas fa-save"></i>
+                                Guardar
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Resultados -->
+                    <div class="results-section">
+                        <div class="results-tabs">
+                            <button class="result-tab-btn active" data-result-tab="json">
+                                <i class="fas fa-table"></i> Resultados
+                            </button>
+                            <button class="result-tab-btn" data-result-tab="mongodb">
+                                <i class="fas fa-terminal"></i> MongoDB Shell
+                            </button>
+                        </div>
+
+                        <!-- Resultados JSON -->
+                        <div id="json-results" class="result-content active">
+                            <div class="result-header">
+                                <span class="result-count">0 resultados</span>
+                                <div class="result-actions">
+                                    <button id="export-json-btn" class="btn-export" disabled>
+                                        <i class="fas fa-download"></i> JSON
+                                    </button>
+                                    <button id="export-csv-btn" class="btn-export" disabled>
+                                        <i class="fas fa-file-csv"></i> CSV
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="results-container" class="results-container">
+                                <div class="no-results">
+                                    <i class="fas fa-search"></i>
+                                    <p>Ejecuta una consulta para ver los resultados</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MongoDB Shell -->
+                        <div id="mongodb-results" class="result-content">
+                            <div class="result-header">
+                                <span>Consulta MongoDB equivalente</span>
+                                <button id="copy-mongodb-btn" class="btn-export">
+                                    <i class="fas fa-copy"></i> Copiar
+                                </button>
+                            </div>
+                            <pre id="mongodb-query" class="mongodb-query">
+                            </pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab: Perfil -->
+        <section id="profile-tab" class="tab-content">
+            <div class="profile-container">
+                
+                <!-- Información Personal -->
+                <div class="profile-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-user"></i> Información Personal</h3>
+                        <button id="edit-profile-btn" class="btn-edit">
+                            <i class="fas fa-edit"></i> Editar
+                        </button>
+                    </div>
+                    
+                    <div class="profile-info">
+                        <div class="info-group">
+                            <label>Nombre de usuario:</label>
+                            <span id="profile-username">Cargando...</span>
+                        </div>
+                        <div class="info-group">
+                            <label>Email:</label>
+                            <span id="profile-email">Cargando...</span>
+                        </div>
+                        <div class="info-group">
+                            <label>Rol:</label>
+                            <span id="profile-role" class="role-badge">Cargando...</span>
+                        </div>
+                        <div class="info-group">
+                            <label>Fecha de registro:</label>
+                            <span id="profile-created">Cargando...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Permisos -->
+                <div class="profile-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-shield-alt"></i> Permisos del Sistema</h3>
+                    </div>
+                    
+                    <div class="permissions-grid">
+                        <div class="permission-item">
+                            <i class="fas fa-search"></i>
+                            <span>SELECT</span>
+                            <span id="perm-select" class="permission-status">⏳</span>
+                        </div>
+                        <div class="permission-item">
+                            <i class="fas fa-plus"></i>
+                            <span>INSERT</span>
+                            <span id="perm-insert" class="permission-status">⏳</span>
+                        </div>
+                        <div class="permission-item">
+                            <i class="fas fa-edit"></i>
+                            <span>UPDATE</span>
+                            <span id="perm-update" class="permission-status">⏳</span>
+                        </div>
+                        <div class="permission-item">
+                            <i class="fas fa-trash"></i>
+                            <span>DELETE</span>
+                            <span id="perm-delete" class="permission-status">⏳</span>
+                        </div>
+                        <div class="permission-item">
+                            <i class="fas fa-table"></i>
+                            <span>CREATE TABLE</span>
+                            <span id="perm-create_table" class="permission-status">⏳</span>
+                        </div>
+                        <div class="permission-item">
+                            <i class="fas fa-times-circle"></i>
+                            <span>DROP TABLE</span>
+                            <span id="perm-drop_table" class="permission-status">⏳</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Estadísticas -->
+                <div class="profile-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-chart-bar"></i> Estadísticas de Uso</h3>
+                    </div>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-number" id="queries-count">0</div>
+                            <div class="stat-label">Consultas Ejecutadas</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="databases-used">0</div>
+                            <div class="stat-label">Bases de Datos Usadas</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="last-login">--</div>
+                            <div class="stat-label">Última Conexión</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number" id="session-time">00:00</div>
+                            <div class="stat-label">Tiempo de Sesión</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Ejecutando consulta...</p>
+        </div>
+    </div>
+
+    <!-- Modal Editar Perfil -->
+    <div id="edit-profile-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Editar Perfil</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="edit-username">Nombre de usuario:</label>
+                    <input type="text" id="edit-username" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="edit-email">Email:</label>
+                    <input type="email" id="edit-email" class="form-input">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-edit-btn" class="btn-secondary">Cancelar</button>
+                <button id="save-edit-btn" class="btn-primary">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JavaScript Modules -->
+    <script type="module">
+        // ✅ IMPORTS CORREGIDOS - Orden correcto de inicialización
+        
+        // 1. Importar módulos principales EXISTENTES (tu base)
+        import { auth } from './src/js/auth.js';
+        import { ui } from './src/js/ui.js';
+        import { storage } from './src/js/storage.js';
+        
+        // 2. Importar módulos del dashboard EXISTENTES
+        import { authCheck } from './src/dashboardJS/auth-check.js';
+        import { headerManager } from './src/dashboardJS/header.js';
+        import { tabsManager } from './src/dashboardJS/tabs.js';
+        import { profileModule } from './src/dashboardJS/profile.js';
+        
+        // 3. ✅ IMPORTS CORREGIDOS: Traductor completo
+        import { mainTranslator } from './src/translatorJS/mainTranslator.js';
+        
+        // Inicialización del dashboard
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                console.log('🚀 Iniciando Dashboard...');
+                
+                // 1. Verificar autenticación (usa tus módulos existentes)
+                const isAuthenticated = await authCheck.verify(auth, storage);
+                if (!isAuthenticated) {
+                    console.log('❌ No autenticado, redirigiendo...');
+                    window.location.href = 'index.html';
+                    return;
+                }
+                
+                console.log('✅ Autenticado, inicializando módulos...');
+                
+                // 2. Inicializar módulos del dashboard EXISTENTES
+                headerManager.init(ui, storage, auth);
+                tabsManager.init();
+                profileModule.init(storage, ui);
+                
+                // 3. ✅ INICIALIZAR TRADUCTOR COMPLETO
+                console.log('🔄 Inicializando traductor completo...');
+                await mainTranslator.init(ui, storage);
+                
+                console.log('✅ Dashboard inicializado correctamente');
+                
+                // Mostrar mensaje de bienvenida
+                ui.showToast('¡Dashboard cargado correctamente!', 'success');
+                
+            } catch (error) {
+                console.error('❌ Error inicializando dashboard:', error);
+                ui.showToast('Error al cargar el dashboard: ' + error.message, 'error');
+                
+                // Redirigir al login en caso de error crítico
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 3000);
+            }
+        });
+    </script>
+
+</body>
+</html>

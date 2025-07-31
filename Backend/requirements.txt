@@ -1,0 +1,11 @@
+pymongo
+sqlparse
+flask
+flask-cors
+flask-jwt-extended
+bcrypt
+marshmallow
+pytest
+pytest-cov
+pytest-ordering
+Flask-Mail 

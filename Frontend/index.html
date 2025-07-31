@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQL-MongoDB Translator - Iniciar Sesión</title>
+  
+  <!-- Estilos -->
+  <link rel="stylesheet" href="src/styles/login.css">
+  
+  <!-- Font Awesome para iconos -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  
+  <!-- Fuente Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Contenedor principal de login -->
+  <div class="login-container">
+    
+    <!-- Fondo animado -->
+    <div class="background-animation">
+      <div class="floating-shape shape-1"></div>
+      <div class="floating-shape shape-2"></div>
+      <div class="floating-shape shape-3"></div>
+    </div>
+
+    <!-- Tarjeta de login -->
+    <div class="login-card">
+      
+      <!-- Header con logo -->
+      <div class="login-header">
+        <div class="logo">
+          <i class="fas fa-database"></i>
+          <h1>SQL Translator</h1>
+        </div>
+        <h2>Iniciar Sesión</h2>
+        <p>Bienvenido de vuelta, ingresa tus credenciales</p>
+      </div>
+
+      <!-- Formulario de login -->
+      <form id="loginForm" class="login-form">
+        
+        <!-- Campo Email -->
+        <div class="form-group">
+          <label for="email">
+            <i class="fas fa-envelope"></i>
+            Correo Electrónico
+          </label>
+          <input 
+            type="email" 
+            id="email" 
+            name="email" 
+            required 
+            autocomplete="email"
+            placeholder="tu@email.com"
+          >
+          <span class="error-message" id="emailError"></span>
+        </div>
+
+        <!-- Campo Contraseña -->
+        <div class="form-group">
+          <label for="password">
+            <i class="fas fa-lock"></i>
+            Contraseña
+          </label>
+          <div class="password-container">
+            <input 
+              type="password" 
+              id="password" 
+              name="password" 
+              required 
+              autocomplete="current-password"
+              placeholder="••••••••"
+            >
+            <button type="button" class="password-toggle" id="passwordToggle">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+          <span class="error-message" id="passwordError"></span>
+        </div>
+
+        <!-- Opciones del formulario -->
+        <div class="form-options">
+          <label class="checkbox-label">
+            <input type="checkbox" id="rememberMe" name="rememberMe">
+            <span class="checkbox-custom"></span>
+            Recordarme
+          </label>
+          
+          <a href="src/Reset/reset.html" class="forgot-link">¿Olvidaste tu contraseña?</a>
+        </div>
+
+        <!-- Botón de login -->
+        <button type="submit" class="login-button" id="loginButton">
+          <span class="button-text">Iniciar Sesión</span>
+          <div class="button-loader" id="buttonLoader">
+            <i class="fas fa-spinner fa-spin"></i>
+          </div>
+        </button>
+
+        <!-- Mensaje de error global -->
+        <div class="global-error" id="globalError">
+          <i class="fas fa-exclamation-triangle"></i>
+          <span id="globalErrorMessage"></span>
+        </div>
+
+      </form>
+
+      <!-- Footer del login -->
+      <div class="login-footer">
+        <p>¿No tienes una cuenta? 
+          <a href="src/Register/register.html" class="register-link">Regístrate aquí</a>
+        </p>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Toast para notificaciones -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts JavaScript -->
+  <script type="module" src="src/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQL-MongoDB Translator - Recuperar Contraseña</title>
+  
+  <!-- Estilos -->
+  <link rel="stylesheet" href="../styles/reset.css">
+  
+  <!-- Font Awesome para iconos -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  
+  <!-- Fuente Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Contenedor principal de reset -->
+  <div class="reset-container">
+    
+    <!-- Fondo animado -->
+    <div class="background-animation">
+      <div class="floating-shape shape-1"></div>
+      <div class="floating-shape shape-2"></div>
+      <div class="floating-shape shape-3"></div>
+      <div class="particle-system" id="particleSystem"></div>
+    </div>
+
+    <!-- Tarjeta de recuperación -->
+    <div class="reset-card">
+      
+      <!-- Indicador de progreso -->
+      <div class="progress-indicator">
+        <div class="progress-step active" data-step="1">
+          <div class="step-number">1</div>
+          <span>Verificación</span>
+        </div>
+        <div class="progress-line"></div>
+        <div class="progress-step" data-step="2">
+          <div class="step-number">2</div>
+          <span>Código</span>
+        </div>
+        <div class="progress-line"></div>
+        <div class="progress-step" data-step="3">
+          <div class="step-number">3</div>
+          <span>Nueva Contraseña</span>
+        </div>
+      </div>
+
+      <!-- PASO 1: Selección de método de recuperación -->
+      <div class="reset-step active" id="step1">
+        <div class="step-header">
+          <div class="logo">
+            <i class="fas fa-shield-alt"></i>
+            <h1>Recuperar Acceso</h1>
+          </div>
+          <h2>¿Cómo prefieres recuperar tu cuenta?</h2>
+          <p>Elige el método más conveniente para ti</p>
+        </div>
+
+        <!-- Opciones de recuperación -->
+        <div class="recovery-options">
+          
+          <!-- Opción por Email -->
+          <div class="recovery-option" data-method="email">
+            <div class="option-icon">
+              <i class="fas fa-envelope"></i>
+            </div>
+            <div class="option-content">
+              <h3>Email de Recuperación</h3>
+              <p>Te enviaremos un código a tu correo electrónico</p>
+              <span class="option-badge">Más Seguro</span>
+            </div>
+            <div class="option-arrow">
+              <i class="fas fa-chevron-right"></i>
+            </div>
+          </div>
+
+          <!-- Opción por SMS (futuro) -->
+          <div class="recovery-option disabled" data-method="sms">
+            <div class="option-icon">
+              <i class="fas fa-mobile-alt"></i>
+            </div>
+            <div class="option-content">
+              <h3>SMS al Teléfono</h3>
+              <p>Código de verificación por mensaje de texto</p>
+              <span class="option-badge coming-soon">Próximamente</span>
+            </div>
+            <div class="option-arrow">
+              <i class="fas fa-chevron-right"></i>
+            </div>
+          </div>
+
+          <!-- Opción por Preguntas de Seguridad (futuro) -->
+          <div class="recovery-option disabled" data-method="security">
+            <div class="option-icon">
+              <i class="fas fa-key"></i>
+            </div>
+            <div class="option-content">
+              <h3>Preguntas de Seguridad</h3>
+              <p>Responde tus preguntas de seguridad configuradas</p>
+              <span class="option-badge coming-soon">Próximamente</span>
+            </div>
+            <div class="option-arrow">
+              <i class="fas fa-chevron-right"></i>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Campo de email cuando se selecciona email -->
+        <div class="email-input-section" id="emailSection" style="display: none;">
+          <div class="form-group">
+            <label for="recoveryEmail">
+              <i class="fas fa-envelope"></i>
+              Correo Electrónico
+            </label>
+            <input 
+              type="email" 
+              id="recoveryEmail" 
+              name="recoveryEmail" 
+              required 
+              placeholder="tu@email.com"
+              autocomplete="email"
+            >
+            <span class="error-message" id="recoveryEmailError"></span>
+          </div>
+          
+          <button type="button" class="reset-button primary" id="sendCodeButton">
+            <span class="button-text">
+              <i class="fas fa-paper-plane"></i>
+              Enviar Código
+            </span>
+            <div class="button-loader">
+              <i class="fas fa-spinner fa-spin"></i>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- PASO 2: Verificación de código -->
+      <div class="reset-step" id="step2">
+        <div class="step-header">
+          <div class="icon-success">
+            <i class="fas fa-envelope-open-text"></i>
+          </div>
+          <h2>Verifica tu Código</h2>
+          <p>Hemos enviado un código de 6 dígitos a <span id="emailDisplay"></span></p>
+        </div>
+
+        <!-- Input de código de verificación -->
+        <div class="verification-section">
+          <div class="code-input-container">
+            <input type="text" class="code-digit" maxlength="1" data-index="0">
+            <input type="text" class="code-digit" maxlength="1" data-index="1">
+            <input type="text" class="code-digit" maxlength="1" data-index="2">
+            <input type="text" class="code-digit" maxlength="1" data-index="3">
+            <input type="text" class="code-digit" maxlength="1" data-index="4">
+            <input type="text" class="code-digit" maxlength="1" data-index="5">
+          </div>
+          
+          <div class="verification-actions">
+            <button type="button" class="reset-button primary" id="verifyCodeButton">
+              <span class="button-text">Verificar Código</span>
+              <div class="button-loader">
+                <i class="fas fa-spinner fa-spin"></i>
+              </div>
+            </button>
+            
+            <div class="resend-section">
+              <p>¿No recibiste el código?</p>
+              <button type="button" class="resend-button" id="resendCodeButton">
+                <i class="fas fa-redo"></i>
+                Reenviar código
+              </button>
+              <div class="countdown-timer" id="countdownTimer">
+                Reenviar en <span id="countdown">60</span>s
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PASO 3: Nueva contraseña -->
+      <div class="reset-step" id="step3">
+        <div class="step-header">
+          <div class="icon-success">
+            <i class="fas fa-check-shield"></i>
+          </div>
+          <h2>Crear Nueva Contraseña</h2>
+          <p>Tu código ha sido verificado. Ahora puedes establecer una nueva contraseña segura.</p>
+        </div>
+
+        <!-- Formulario de nueva contraseña -->
+        <form id="newPasswordForm" class="password-form">
+          
+          <!-- Nueva contraseña -->
+          <div class="form-group">
+            <label for="newPassword">
+              <i class="fas fa-lock"></i>
+              Nueva Contraseña
+            </label>
+            <div class="password-container">
+              <input 
+                type="password" 
+                id="newPassword" 
+                name="newPassword" 
+                required 
+                placeholder="••••••••"
+                autocomplete="new-password"
+              >
+              <button type="button" class="password-toggle" id="newPasswordToggle">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+            <span class="error-message" id="newPasswordError"></span>
+            
+            <!-- Medidor de fortaleza -->
+            <div class="password-strength" id="passwordStrength">
+              <div class="strength-meter">
+                <div class="strength-fill" id="strengthFill"></div>
+              </div>
+              <span class="strength-text" id="strengthText">Ingresa una contraseña</span>
+            </div>
+          </div>
+
+          <!-- Confirmar contraseña -->
+          <div class="form-group">
+            <label for="confirmNewPassword">
+              <i class="fas fa-lock"></i>
+              Confirmar Nueva Contraseña
+            </label>
+            <div class="password-container">
+              <input 
+                type="password" 
+                id="confirmNewPassword" 
+                name="confirmNewPassword" 
+                required 
+                placeholder="••••••••"
+                autocomplete="new-password"
+              >
+              <button type="button" class="password-toggle" id="confirmPasswordToggle">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+            <span class="error-message" id="confirmNewPasswordError"></span>
+          </div>
+
+          <button type="submit" class="reset-button success" id="resetPasswordButton">
+            <span class="button-text">
+              <i class="fas fa-shield-check"></i>
+              Cambiar Contraseña
+            </span>
+            <div class="button-loader">
+              <i class="fas fa-spinner fa-spin"></i>
+            </div>
+          </button>
+
+        </form>
+      </div>
+
+      <!-- PASO 4: Confirmación exitosa -->
+      <div class="reset-step" id="step4">
+        <div class="step-header success-state">
+          <div class="icon-success large">
+            <i class="fas fa-check-circle"></i>
+          </div>
+          <h2>¡Contraseña Actualizada!</h2>
+          <p>Tu contraseña ha sido cambiada exitosamente. Ya puedes iniciar sesión con tu nueva contraseña.</p>
+        </div>
+
+        <div class="success-actions">
+          <button type="button" class="reset-button primary" id="goToLoginButton">
+            <i class="fas fa-sign-in-alt"></i>
+            Ir al Login
+          </button>
+          
+          <div class="auto-redirect">
+            <p>Serás redirigido automáticamente en <span id="redirectCountdown">5</span> segundos</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mensajes globales -->
+      <div class="global-message error" id="globalError">
+        <i class="fas fa-exclamation-triangle"></i>
+        <span id="globalErrorMessage"></span>
+      </div>
+
+      <div class="global-message success" id="globalSuccess">
+        <i class="fas fa-check-circle"></i>
+        <span id="globalSuccessMessage"></span>
+      </div>
+
+      <!-- Footer con enlace de vuelta -->
+      <div class="reset-footer">
+        <a href="../../index.html" class="back-link">
+          <i class="fas fa-arrow-left"></i>
+          Volver al Login
+        </a>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Toast para notificaciones -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts JavaScript -->
+  <script type="module" src="../ResetJS/main.js"></script>
+</body>
+</html>
