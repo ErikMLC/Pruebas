@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Control de Permisos</title>
+    
+    <!-- CSS Reutilizado -->
+    <link rel="stylesheet" href="src/styles/dashboard.css">
+    <link rel="stylesheet" href="src/styles/admin-dashboard.css">
+    
+    <!-- Font Awesome para iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Header Admin -->
+    <header class="dashboard-header admin-header">
+        <div class="header-left">
+            <i class="fas fa-shield-alt admin-icon"></i>
+            <h1>Panel de Administración</h1>
+            <span class="admin-badge">CONTROL DE PERMISOS</span>
+        </div>
+        
+        <div class="header-right">
+            <div class="admin-stats-header">
+                <div class="stat-pill">
+                    <i class="fas fa-users"></i>
+                    <span id="total-users-header">--</span>
+                    <small>Usuarios</small>
+                </div>
+                <div class="stat-pill">
+                    <i class="fas fa-user-check"></i>
+                    <span id="active-users-header">--</span>
+                    <small>Activos</small>
+                </div>
+            </div>
+            
+            <span class="user-info">
+                <i class="fas fa-user-crown"></i>
+                <span id="admin-username">Cargando...</span>
+            </span>
+            <button id="admin-logout-btn" class="logout-btn admin-logout">
+                <i class="fas fa-sign-out-alt"></i>
+                Salir
+            </button>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs Admin (Solo 2 principales) -->
+    <nav class="dashboard-tabs admin-tabs">
+        <button class="tab-btn active" data-tab="dashboard">
+            <i class="fas fa-chart-pie"></i>
+            Dashboard
+        </button>
+        <button class="tab-btn" data-tab="permissions">
+            <i class="fas fa-users-cog"></i>
+            Control de Permisos
+        </button>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="dashboard-content admin-content">
+        
+        <!-- Tab: Dashboard Overview -->
+        <section id="dashboard-tab" class="tab-content active">
+            <div class="admin-dashboard-overview">
+                
+                <!-- Resumen de Permisos -->
+                <div class="permissions-summary">
+                    <h2><i class="fas fa-chart-pie"></i> Resumen de Permisos del Sistema</h2>
+                    
+                    <div class="permissions-overview-grid">
+                        <div class="permission-overview-card">
+                            <div class="permission-icon select">
+                                <i class="fas fa-search"></i>
+                            </div>
+                            <div class="permission-stats">
+                                <h3 id="select-users-count">--</h3>
+                                <p>Usuarios con SELECT</p>
+                                <div class="permission-bar">
+                                    <div class="permission-fill" id="select-percentage-bar" style="width: 0%"></div>
+                                </div>
+                                <small id="select-percentage-text">--% del total</small>
+                            </div>
+                        </div>
+
+                        <div class="permission-overview-card">
+                            <div class="permission-icon insert">
+                                <i class="fas fa-plus"></i>
+                            </div>
+                            <div class="permission-stats">
+                                <h3 id="insert-users-count">--</h3>
+                                <p>Usuarios con INSERT</p>
+                                <div class="permission-bar">
+                                    <div class="permission-fill" id="insert-percentage-bar" style="width: 0%"></div>
+                                </div>
+                                <small id="insert-percentage-text">--% del total</small>
+                            </div>
+                        </div>
+
+                        <div class="permission-overview-card">
+                            <div class="permission-icon update">
+                                <i class="fas fa-edit"></i>
+                            </div>
+                            <div class="permission-stats">
+                                <h3 id="update-users-count">--</h3>
+                                <p>Usuarios con UPDATE</p>
+                                <div class="permission-bar">
+                                    <div class="permission-fill" id="update-percentage-bar" style="width: 0%"></div>
+                                </div>
+                                <small id="update-percentage-text">--% del total</small>
+                            </div>
+                        </div>
+
+                        <div class="permission-overview-card">
+                            <div class="permission-icon delete">
+                                <i class="fas fa-trash"></i>
+                            </div>
+                            <div class="permission-stats">
+                                <h3 id="delete-users-count">--</h3>
+                                <p>Usuarios con DELETE</p>
+                                <div class="permission-bar">
+                                    <div class="permission-fill" id="delete-percentage-bar" style="width: 0%"></div>
+                                </div>
+                                <small id="delete-percentage-text">--% del total</small>
+                            </div>
+                        </div>
+
+                        <div class="permission-overview-card">
+                            <div class="permission-icon create">
+                                <i class="fas fa-table"></i>
+                            </div>
+                            <div class="permission-stats">
+                                <h3 id="create-users-count">--</h3>
+                                <p>Usuarios con CREATE TABLE</p>
+                                <div class="permission-bar">
+                                    <div class="permission-fill" id="create-percentage-bar" style="width: 0%"></div>
+                                </div>
+                                <small id="create-percentage-text">--% del total</small>
+                            </div>
+                        </div>
+
+                        <div class="permission-overview-card">
+                            <div class="permission-icon drop">
+                                <i class="fas fa-times-circle"></i>
+                            </div>
+                            <div class="permission-stats">
+                                <h3 id="drop-users-count">--</h3>
+                                <p>Usuarios con DROP TABLE</p>
+                                <div class="permission-bar">
+                                    <div class="permission-fill" id="drop-percentage-bar" style="width: 0%"></div>
+                                </div>
+                                <small id="drop-percentage-text">--% del total</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Estadísticas Generales -->
+                <div class="general-stats">
+                    <div class="stats-row">
+                        <div class="stat-card">
+                            <div class="stat-icon users">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="total-users-dashboard">--</h3>
+                                <p>Total de Usuarios</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon active">
+                                <i class="fas fa-user-check"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="active-users-dashboard">--</h3>
+                                <p>Usuarios Activos</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon admins">
+                                <i class="fas fa-user-shield"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="admin-users-dashboard">--</h3>
+                                <p>Administradores</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab: Control de Permisos -->
+        <section id="permissions-tab" class="tab-content">
+            <div class="permissions-control">
+                <div class="section-header">
+                    <h2><i class="fas fa-users-cog"></i> Control de Permisos de Usuarios</h2>
+                    <div class="section-actions">
+                        <button class="btn-refresh" id="refresh-users">
+                            <i class="fas fa-sync-alt"></i>
+                            Actualizar
+                        </button>
+                        <div class="search-container">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="user-search" placeholder="Buscar usuario..." class="search-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabla de Control de Permisos -->
+                <div class="permissions-table-container">
+                    <table class="permissions-table" id="permissions-table">
+                        <thead>
+                            <tr>
+                                <th class="user-col">
+                                    <i class="fas fa-user"></i>
+                                    Usuario
+                                </th>
+                                <th class="email-col">
+                                    <i class="fas fa-envelope"></i>
+                                    Email
+                                </th>
+                                <th class="status-col">
+                                    <i class="fas fa-toggle-on"></i>
+                                    Estado
+                                </th>
+                                <th class="permission-col select">
+                                    <i class="fas fa-search"></i>
+                                    SELECT
+                                </th>
+                                <th class="permission-col insert">
+                                    <i class="fas fa-plus"></i>
+                                    INSERT
+                                </th>
+                                <th class="permission-col update">
+                                    <i class="fas fa-edit"></i>
+                                    UPDATE
+                                </th>
+                                <th class="permission-col delete">
+                                    <i class="fas fa-trash"></i>
+                                    DELETE
+                                </th>
+                                <th class="permission-col create">
+                                    <i class="fas fa-table"></i>
+                                    CREATE
+                                </th>
+                                <th class="permission-col drop">
+                                    <i class="fas fa-times-circle"></i>
+                                    DROP
+                                </th>
+                                <th class="actions-col">
+                                    <i class="fas fa-cog"></i>
+                                    Acciones
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="permissions-table-body">
+                            <!-- Los usuarios se cargarán dinámicamente aquí -->
+                            <tr class="loading-row">
+                                <td colspan="10">
+                                    <div class="table-loading">
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                        <span>Cargando usuarios y permisos...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Leyenda de la Tabla -->
+                <div class="table-legend">
+                    <h4><i class="fas fa-info-circle"></i> Cómo usar:</h4>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <span class="toggle-switch active"></span>
+                            <span>Permiso activado</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="toggle-switch"></span>
+                            <span>Permiso desactivado</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="user-status active"></span>
+                            <span>Usuario activo</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="user-status inactive"></span>
+                            <span>Usuario inactivo</span>
+                        </div>
+                    </div>
+                    <p><strong>Nota:</strong> Los cambios se guardan automáticamente al activar/desactivar permisos.</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-spinner">
+            <i class="fas fa-shield-alt fa-spin"></i>
+            <p>Actualizando permisos...</p>
+        </div>
+    </div>
+
+    <!-- Modal de Confirmación -->
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h3 id="confirm-title">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Confirmar Cambio de Permiso
+                </h3>
+                <button class="modal-close" id="confirm-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="confirm-content">
+                    <div class="permission-change-info">
+                        <div class="user-info">
+                            <strong>Usuario:</strong> <span id="confirm-username"></span>
+                        </div>
+                        <div class="permission-info">
+                            <strong>Permiso:</strong> <span id="confirm-permission"></span>
+                        </div>
+                        <div class="action-info">
+                            <strong>Acción:</strong> <span id="confirm-action"></span>
+                        </div>
+                    </div>
+                    <p id="confirm-message">¿Estás seguro de que quieres realizar este cambio?</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="confirm-cancel">
+                    <i class="fas fa-times"></i>
+                    Cancelar
+                </button>
+                <button type="button" class="btn-primary" id="confirm-accept">
+                    <i class="fas fa-check"></i>
+                    Confirmar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JavaScript Modules -->
+    <script type="module">
+        // ✅ IMPORTS - Reutilizando módulos existentes + nuevos admin
+        
+        // 1. Módulos base existentes (REUTILIZAR)
+        import { auth } from './src/js/auth.js';
+        import { ui } from './src/js/ui.js';
+        import { storage } from './src/js/storage.js';
+        
+        // 2. Módulos dashboard existentes (REUTILIZAR)
+        import { tabsManager } from './src/dashboardJS/tabs.js';
+        
+        // 3. Módulos admin nuevos (CREAR)
+        import { adminMain } from './src/adminJS/adminMain.js';
+        import { adminAuth } from './src/adminJS/adminAuth.js';
+        import { permissionsManager } from './src/adminJS/permissionsManager.js';
+        
+        // Inicialización del Admin Dashboard
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                console.log('🛡️ Iniciando Panel de Control de Permisos...');
+                
+                // 1. Verificar autenticación ADMIN (crítico)
+                const isAdminAuthenticated = await adminAuth.verifyAdmin(auth, storage);
+                if (!isAdminAuthenticated) {
+                    console.log('❌ Acceso denegado - No es administrador');
+                    adminAuth.redirectToLogin();
+                    return;
+                }
+                
+                console.log('✅ Acceso admin verificado, inicializando...');
+                
+                // 2. Inicializar módulos del admin dashboard
+                tabsManager.init(); // Reutilizar sistema de pestañas
+                await adminMain.init(ui, storage, auth); // Coordinador principal admin
+                await permissionsManager.init(ui, storage, auth); // Gestor de permisos
+                
+                console.log('✅ Panel de Control de Permisos inicializado correctamente');
+                
+                // Mostrar mensaje de bienvenida
+                ui.showToast('¡Panel de Control de Permisos cargado!', 'success');
+                
+            } catch (error) {
+                console.error('❌ Error inicializando panel admin:', error);
+                ui.showToast('Error cargando panel: ' + error.message, 'error');
+                
+                // Redirigir al login en caso de error crítico
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 3000);
+            }
+        });
+        
+        // Configuración global para el panel admin
+        window.adminConfig = {
+            permissions: ['select', 'insert', 'update', 'delete', 'create_table', 'drop_table'],
+            refreshInterval: 30000, // Actualizar cada 30 segundos
+            autoSave: true // Guardar cambios automáticamente
+        };
+    </script>
+
+</body>
+</html>
