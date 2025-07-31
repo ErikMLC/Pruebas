@@ -190,30 +190,30 @@ export const mainTranslator = {
         connectBtn?.addEventListener('click', () => {
             this.connectToDatabase();
         });
-        
+
         // Editor SQL - actualizar botón traducir
         const sqlEditor = document.getElementById('sql-editor');
         sqlEditor?.addEventListener('input', () => {
             this.updateTranslateButton();
         });
-        
+
         // Botón traducir y ejecutar
         const translateBtn = document.getElementById('translate-btn');
         translateBtn?.addEventListener('click', () => {
             this.executeQuery();
         });
-        
+
         // Botones de utilidad
         const clearBtn = document.getElementById('clear-btn');
         clearBtn?.addEventListener('click', () => {
             this.clearEditor();
         });
-        
+
         const exampleBtn = document.getElementById('example-btn');
         exampleBtn?.addEventListener('click', () => {
             this.insertExample();
         });
-        
+
         // Pestañas de resultados
         const resultTabs = document.querySelectorAll('.result-tab-btn');
         resultTabs.forEach(tab => {
@@ -221,24 +221,24 @@ export const mainTranslator = {
                 this.switchResultTab(e.target.dataset.resultTab);
             });
         });
-        
+
         // Botones de exportación
         const exportJsonBtn = document.getElementById('export-json-btn');
         exportJsonBtn?.addEventListener('click', () => {
             this.exportResults('json');
         });
-        
+
         const exportCsvBtn = document.getElementById('export-csv-btn');
         exportCsvBtn?.addEventListener('click', () => {
             this.exportResults('csv');
         });
-        
+
         // Botón copiar MongoDB shell
         const copyMongoBtn = document.getElementById('copy-mongodb-btn');
         copyMongoBtn?.addEventListener('click', () => {
             this.copyMongoQuery();
         });
-        
+
         console.log('📡 Eventos de interfaz configurados');
     },
     
@@ -267,10 +267,9 @@ export const mainTranslator = {
         // Solo mostrar ejemplos según permisos disponibles
         console.log('🔐 Permisos disponibles para ejemplos:', permissions);
     },
-    
 
     /**
-     * ✅ ACTUALIZAR: Conecta a la base de datos seleccionada
+     * ✅ ACTUALIZADO: Conecta a la base de datos seleccionada con debug detallado
      */
     async connectToDatabase() {
         try {
@@ -286,14 +285,82 @@ export const mainTranslator = {
             // Mostrar loading
             this.showLoading(true);
             
-            // Ejecutar conexión
+            // ✅ DEBUG: Ejecutar conexión con logging detallado
+            console.log('📡 Enviando petición de conexión...');
             const response = await this.parsers.api.connectDatabase(selectedDB, token);
-            const collections = response.collections || [];
+            
+            // ✅ DEBUG: Mostrar respuesta completa del backend
+            console.log('📋 Respuesta completa del backend:', response);
+            console.log('📋 Tipo de respuesta:', typeof response);
+            console.log('📋 Keys de la respuesta:', Object.keys(response));
+            
+            // ✅ DEBUG: Extraer colecciones con múltiples intentos
+            let collections = [];
+            
+            if (response.collections) {
+                collections = response.collections;
+                console.log('✅ Colecciones encontradas en response.collections:', collections);
+            } else if (response.data && response.data.collections) {
+                collections = response.data.collections;
+                console.log('✅ Colecciones encontradas en response.data.collections:', collections);
+            } else if (Array.isArray(response)) {
+                collections = response;
+                console.log('✅ Respuesta es un array directo:', collections);
+            } else {
+                console.warn('⚠️ No se encontraron colecciones en la respuesta');
+                console.log('📋 Estructura completa:', JSON.stringify(response, null, 2));
+                
+                // ✅ Buscar colecciones en cualquier parte de la respuesta
+                const findCollections = (obj, path = '') => {
+                    if (Array.isArray(obj)) {
+                        console.log(`🔍 Array encontrado en ${path}:`, obj);
+                        return obj;
+                    }
+                    if (typeof obj === 'object' && obj !== null) {
+                        for (const [key, value] of Object.entries(obj)) {
+                            if (key.toLowerCase().includes('collection')) {
+                                console.log(`🔍 Key con 'collection' encontrada: ${path}.${key}`, value);
+                                if (Array.isArray(value)) return value;
+                            }
+                            if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') {
+                                console.log(`🔍 Array de strings encontrado en ${path}.${key}:`, value);
+                                return value;
+                            }
+                        }
+                    }
+                    return null;
+                };
+                
+                const foundCollections = findCollections(response);
+                if (foundCollections) {
+                    collections = foundCollections;
+                    console.log('✅ Colecciones encontradas por búsqueda:', collections);
+                }
+            }
+            
+            // ✅ DEBUG: Validar y limpiar colecciones
+            if (Array.isArray(collections)) {
+                // Filtrar elementos válidos
+                collections = collections.filter(col => 
+                    typeof col === 'string' && col.trim() !== ''
+                );
+                console.log('✅ Colecciones filtradas:', collections);
+            } else {
+                console.warn('⚠️ collections no es un array:', typeof collections, collections);
+                collections = [];
+            }
             
             // Actualizar estado
             this.state.currentDatabase = selectedDB;
             this.state.isConnected = true;
             this.state.currentCollections = collections;
+            
+            console.log(`📊 Estado actualizado:`, {
+                database: this.state.currentDatabase,
+                connected: this.state.isConnected,
+                collectionsCount: collections.length,
+                collections: collections
+            });
             
             // ✅ MOSTRAR PANEL DE COLECCIONES
             this.showCollectionsPanel(selectedDB, collections);
@@ -301,11 +368,22 @@ export const mainTranslator = {
             // Actualizar interfaz
             this.updateTranslateButton();
             
-            this.ui?.showToast(`✅ Conectado a ${selectedDB}`, 'success');
+            if (collections.length > 0) {
+                this.ui?.showToast(`✅ Conectado a ${selectedDB} (${collections.length} colecciones)`, 'success');
+            } else {
+                this.ui?.showToast(`✅ Conectado a ${selectedDB} (sin colecciones visibles)`, 'warning');
+            }
             
         } catch (error) {
             console.error('❌ Error conectando a base de datos:', error);
+            console.error('❌ Stack trace:', error.stack);
             this.ui?.showToast('Error conectando: ' + error.message, 'error');
+            
+            // Mostrar información adicional del error
+            if (error.response) {
+                console.error('❌ Response error:', error.response);
+            }
+            
         } finally {
             this.showLoading(false);
         }
@@ -1424,5 +1502,322 @@ export const mainTranslator = {
         this.updateTranslateButton();
         
         this.ui?.showToast(`Tabla "${name}" insertada`, 'success');
+    },
+
+    // ✅ AGREGAR estas funciones al final del objeto mainTranslator en mainTranslator.js
+
+    /**
+     * ✅ NUEVO: Refresca la lista de colecciones
+     */
+    async refreshCollections() {
+        try {
+            if (!this.state.isConnected || !this.state.currentDatabase) {
+                this.ui?.showToast('No hay base de datos conectada', 'warning');
+                return;
+            }
+
+            console.log('🔄 Refrescando colecciones...');
+            const token = this.storage?.getToken();
+            
+            // Mostrar loading en el botón
+            const refreshBtn = document.getElementById('refresh-collections');
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
+            }
+
+            // Obtener colecciones actualizadas
+            const response = await this.parsers.api.connectDatabase(this.state.currentDatabase, token);
+            const collections = response.collections || [];
+
+            // Actualizar estado
+            this.state.currentCollections = collections;
+
+            // Actualizar UI
+            this.updateCollectionsList(collections);
+
+            this.ui?.showToast(`✅ Colecciones actualizadas (${collections.length})`, 'success');
+
+        } catch (error) {
+            console.error('❌ Error refrescando colecciones:', error);
+            this.ui?.showToast('Error actualizando colecciones: ' + error.message, 'error');
+        } finally {
+            // Restaurar botón
+            const refreshBtn = document.getElementById('refresh-collections');
+            if (refreshBtn) {
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Actualizar';
+            }
+        }
+    },
+
+    /**
+     * ✅ NUEVO: Inserta nombre de colección en el editor
+     * @param {string} name - Nombre de la colección
+     */
+    insertCollectionName(name) {
+        const editor = document.getElementById('sql-editor');
+        if (!editor) return;
+        
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        const text = editor.value;
+        
+        // Insertar el nombre en la posición del cursor
+        const beforeCursor = text.substring(0, start);
+        const afterCursor = text.substring(end);
+        
+        editor.value = beforeCursor + name + afterCursor;
+        
+        // Mover cursor al final del texto insertado
+        const newPosition = start + name.length;
+        editor.focus();
+        editor.setSelectionRange(newPosition, newPosition);
+        
+        // Actualizar botón traducir
+        this.updateTranslateButton();
+        
+        this.ui?.showToast(`📁 Tabla "${name}" insertada en el editor`, 'success');
+    },
+
+    /**
+     * ✅ CORREGIDO: Configurar eventos del panel de colecciones
+     */
+    bindCollectionsEvents() {
+        // Buscar colecciones
+        const searchInput = document.getElementById('collections-search');
+        if (searchInput) {
+            // Remover listeners anteriores
+            searchInput.removeEventListener('input', this.handleCollectionSearch);
+            // Agregar nuevo listener
+            this.handleCollectionSearch = (e) => {
+                this.filterCollections(e.target.value);
+            };
+            searchInput.addEventListener('input', this.handleCollectionSearch);
+        }
+        
+        // Actualizar colecciones
+        const refreshBtn = document.getElementById('refresh-collections');
+        if (refreshBtn) {
+            // Remover listeners anteriores
+            refreshBtn.removeEventListener('click', this.handleRefreshCollections);
+            // Agregar nuevo listener
+            this.handleRefreshCollections = () => {
+                this.refreshCollections();
+            };
+            refreshBtn.addEventListener('click', this.handleRefreshCollections);
+        }
+        
+        // Desconectar
+        const disconnectBtn = document.getElementById('disconnect-db');
+        if (disconnectBtn) {
+            // Remover listeners anteriores
+            disconnectBtn.removeEventListener('click', this.handleDisconnectDatabase);
+            // Agregar nuevo listener
+            this.handleDisconnectDatabase = () => {
+                this.disconnectDatabase();
+            };
+            disconnectBtn.addEventListener('click', this.handleDisconnectDatabase);
+        }
+
+        console.log('📡 Eventos del panel de colecciones configurados');
+    },
+
+    /**
+     * ✅ CORREGIDO: Filtrar colecciones en tiempo real
+     * @param {string} searchTerm - Término de búsqueda
+     */
+    filterCollections(searchTerm) {
+        const items = document.querySelectorAll('.collection-item');
+        const term = searchTerm.toLowerCase().trim();
+        
+        let visibleCount = 0;
+        
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            const isVisible = !term || text.includes(term);
+            
+            item.style.display = isVisible ? 'flex' : 'none';
+            if (isVisible) visibleCount++;
+        });
+
+        // Mostrar mensaje si no hay resultados
+        const list = document.getElementById('collections-list');
+        if (list && visibleCount === 0 && term) {
+            const noResults = list.querySelector('.no-results-filter');
+            if (!noResults) {
+                const li = document.createElement('li');
+                li.className = 'no-results-filter';
+                li.innerHTML = '<i class="fas fa-search"></i> No se encontraron colecciones';
+                list.appendChild(li);
+            }
+        } else {
+            // Remover mensaje de "no encontrado"
+            const noResults = list?.querySelector('.no-results-filter');
+            if (noResults) {
+                noResults.remove();
+            }
+        }
+
+        console.log(`🔍 Filtrado: ${visibleCount} colecciones visibles para "${term}"`);
+    },
+
+    /**
+     * ✅ CORREGIDO: Selecciona una colección específica
+     * @param {string} collectionName - Nombre de la colección
+     * @param {HTMLElement} element - Elemento de la lista
+     */
+    selectCollection(collectionName, element) {
+        // Remover selección anterior
+        document.querySelectorAll('.collection-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        
+        // Seleccionar nueva
+        if (element) {
+            element.classList.add('selected');
+        }
+        
+        // Insertar en editor
+        this.insertCollectionName(collectionName);
+        
+        this.ui?.showToast(`📁 Colección "${collectionName}" seleccionada`, 'success');
+    },
+
+    /**
+     * ✅ MEJORADO: Actualiza lista de colecciones con eventos
+     * @param {Array} collections - Lista de colecciones
+     */
+    updateCollectionsList(collections) {
+        const list = document.getElementById('collections-list');
+        if (!list) return;
+        
+        // Limpiar lista existente
+        list.innerHTML = '';
+        
+        if (!collections || collections.length === 0) {
+            list.innerHTML = '<li class="no-collections"><i class="fas fa-table"></i> No hay colecciones</li>';
+            return;
+        }
+        
+        // Crear elementos de colección
+        collections.forEach(collection => {
+            const li = document.createElement('li');
+            li.className = 'collection-item';
+            li.innerHTML = `<i class="fas fa-table"></i> ${collection}`;
+            li.title = `Click para usar "${collection}" en el editor`;
+            
+            // Event listener para insertar nombre en editor
+            li.addEventListener('click', () => {
+                this.selectCollection(collection, li);
+            });
+            
+            list.appendChild(li);
+        });
+        
+        console.log(`📁 ${collections.length} colecciones cargadas en panel`);
+    },
+
+    /**
+     * ✅ MEJORADO: Muestra el panel de colecciones con mejor UX
+     * @param {string} databaseName - Nombre de la base de datos
+     * @param {Array} collections - Lista de colecciones
+     */
+    showCollectionsPanel(databaseName, collections) {
+        const panel = document.getElementById('collections-panel');
+        const dbNameEl = document.getElementById('connected-db-name');
+        
+        if (panel && dbNameEl) {
+            // Actualizar nombre de BD
+            dbNameEl.textContent = databaseName;
+            
+            // Mostrar panel con animación
+            panel.style.display = 'block';
+            
+            // Actualizar lista de colecciones
+            this.updateCollectionsList(collections);
+            
+            // Configurar eventos del panel
+            this.bindCollectionsEvents();
+            
+            // Limpiar búsqueda anterior
+            const searchInput = document.getElementById('collections-search');
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            
+            console.log(`🗂️ Panel de colecciones mostrado para ${databaseName} (${collections.length} colecciones)`);
+        }
+    },
+
+    /**
+     * ✅ MEJORADO: Desconecta de la base de datos
+     */
+    disconnectDatabase() {
+        try {
+            console.log('📤 Desconectando de la base de datos...');
+            
+            // Ocultar panel de colecciones
+            const panel = document.getElementById('collections-panel');
+            if (panel) {
+                panel.style.display = 'none';
+            }
+            
+            // Resetear estado
+            this.state.currentDatabase = null;
+            this.state.isConnected = false;
+            this.state.currentCollections = [];
+            
+            // Resetear selector
+            const dbSelect = document.getElementById('database-select');
+            if (dbSelect) {
+                dbSelect.value = '';
+            }
+            
+            // Deshabilitar botón conectar
+            const connectBtn = document.getElementById('connect-btn');
+            if (connectBtn) {
+                connectBtn.disabled = true;
+            }
+            
+            // Actualizar botón traducir
+            this.updateTranslateButton();
+            
+            // Limpiar búsqueda
+            const searchInput = document.getElementById('collections-search');
+            if (searchInput) {
+                searchInput.value = '';
+            }
+            
+            this.ui?.showToast('📤 Desconectado de la base de datos', 'info');
+            
+        } catch (error) {
+            console.error('❌ Error desconectando:', error);
+            this.ui?.showToast('Error al desconectar', 'error');
+        }
+    },
+
+    /**
+     * ✅ NUEVO: Limpia eventos para evitar memory leaks
+     */
+    cleanup() {
+        // Limpiar eventos de colecciones
+        const searchInput = document.getElementById('collections-search');
+        if (searchInput && this.handleCollectionSearch) {
+            searchInput.removeEventListener('input', this.handleCollectionSearch);
+        }
+        
+        const refreshBtn = document.getElementById('refresh-collections');
+        if (refreshBtn && this.handleRefreshCollections) {
+            refreshBtn.removeEventListener('click', this.handleRefreshCollections);
+        }
+        
+        const disconnectBtn = document.getElementById('disconnect-db');
+        if (disconnectBtn && this.handleDisconnectDatabase) {
+            disconnectBtn.removeEventListener('click', this.handleDisconnectDatabase);
+        }
+        
+        console.log('🧹 Eventos del traductor limpiados');
     }
+
 };

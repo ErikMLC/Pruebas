@@ -122,7 +122,7 @@ class MongoDBConnector:
             list: Lista filtrada.
         """
         # Bases de datos del sistema a excluir
-        system_dbs = ['admin', 'local', 'config']
+        system_dbs = ['admin', 'local', 'config', 'sql_middleware_auth']
         return [db for db in databases if db not in system_dbs]
     
     def set_database(self, database_name):

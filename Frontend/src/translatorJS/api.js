@@ -42,6 +42,8 @@ export const translatorAPI = {
         return response.databases || [];
     },
     
+   // ✅ REEMPLAZAR el método connectDatabase() en translatorJS/api.js
+
     /**
      * Conecta a una base de datos específica
      * @param {string} databaseName - Nombre de la base de datos
@@ -49,12 +51,100 @@ export const translatorAPI = {
      * @returns {Promise<Array>} - Lista de colecciones
      */
     async connectDatabase(databaseName, token) {
-        console.log(`🔌 [API] Conectando a: ${databaseName}`);
-        const response = await this.makeRequest('/connect', {
-            method: 'POST',
-            body: JSON.stringify({ database: databaseName })
-        }, token);
-        return response.collections || [];
+        try {
+            console.log(`🔌 [API] Conectando a: ${databaseName}`);
+            
+            // ✅ DEBUG: Mostrar detalles de la petición
+            const requestBody = { database: databaseName };
+            console.log('📤 [API] Request body:', requestBody);
+            console.log('📤 [API] Token (primeros 20 chars):', token ? token.substring(0, 20) + '...' : 'NO TOKEN');
+            
+            const response = await this.makeRequest('/connect', {
+                method: 'POST',
+                body: JSON.stringify(requestBody)
+            }, token);
+            
+            // ✅ DEBUG: Mostrar respuesta completa
+            console.log('📥 [API] Response completa:', response);
+            console.log('📥 [API] Tipo de response:', typeof response);
+            console.log('📥 [API] Keys de response:', Object.keys(response || {}));
+            
+            // ✅ DEBUG: Extraer colecciones con logging
+            let collections = [];
+            
+            if (response && response.collections) {
+                collections = response.collections;
+                console.log('✅ [API] Colecciones en response.collections:', collections);
+            } else if (response && response.data && response.data.collections) {
+                collections = response.data.collections;
+                console.log('✅ [API] Colecciones en response.data.collections:', collections);
+            } else if (Array.isArray(response)) {
+                collections = response;
+                console.log('✅ [API] Response es array directo:', collections);
+            } else if (response && response.result && Array.isArray(response.result)) {
+                collections = response.result;
+                console.log('✅ [API] Colecciones en response.result:', collections);
+            } else {
+                console.warn('⚠️ [API] Estructura de response no reconocida');
+                console.log('📋 [API] Response completa para análisis:', JSON.stringify(response, null, 2));
+                
+                // Buscar arrays en cualquier parte de la respuesta
+                const searchForArrays = (obj, path = '') => {
+                    if (Array.isArray(obj)) {
+                        console.log(`🔍 [API] Array encontrado en ${path}:`, obj);
+                        return obj;
+                    }
+                    if (typeof obj === 'object' && obj !== null) {
+                        for (const [key, value] of Object.entries(obj)) {
+                            if (Array.isArray(value)) {
+                                console.log(`🔍 [API] Array en ${path}.${key}:`, value);
+                                return value;
+                            }
+                            if (typeof value === 'object') {
+                                const found = searchForArrays(value, `${path}.${key}`);
+                                if (found) return found;
+                            }
+                        }
+                    }
+                    return null;
+                };
+                
+                const foundArray = searchForArrays(response);
+                if (foundArray) {
+                    collections = foundArray;
+                    console.log('✅ [API] Array encontrado por búsqueda profunda:', collections);
+                }
+            }
+            
+            // ✅ Validar que collections sea un array
+            if (!Array.isArray(collections)) {
+                console.warn('⚠️ [API] collections no es un array, convirtiendo:', typeof collections, collections);
+                collections = [];
+            }
+            
+            // ✅ Filtrar elementos válidos
+            const originalLength = collections.length;
+            collections = collections.filter(item => 
+                typeof item === 'string' && item.trim() !== ''
+            );
+            
+            if (collections.length !== originalLength) {
+                console.log(`🧹 [API] Filtradas ${originalLength - collections.length} colecciones inválidas`);
+            }
+            
+            console.log(`✅ [API] Resultado final: ${collections.length} colecciones válidas:`, collections);
+            
+            return { collections: collections };
+            
+        } catch (error) {
+            console.error('❌ [API] Error en connectDatabase:', error);
+            console.error('❌ [API] Error details:', {
+                message: error.message,
+                stack: error.stack,
+                response: error.response
+            });
+            throw error;
+        }
     },
     
     /**
