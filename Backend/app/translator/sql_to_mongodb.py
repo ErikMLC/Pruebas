@@ -211,7 +211,7 @@ class SQLToMongoDBTranslator:
     def _translate_select_aggregate(self):
         """
         Traduce una consulta SELECT compleja a una operación aggregate() de MongoDB.
-        🆕 EXTENDIDO con soporte para DISTINCT, HAVING, funciones SQL y más.
+        🔧 CORREGIDO: Convierte campos numéricos almacenados como string antes de ORDER BY
         
         Returns:
             dict: Diccionario con la operación aggregate de MongoDB
@@ -228,17 +228,54 @@ class SQLToMongoDBTranslator:
                 "$match": where_clause
             })
         
-        # 🆕 2. Manejar DISTINCT si está presente
+        # 🔧 NUEVO: 2. Detectar si ORDER BY usa campos que podrían ser numéricos almacenados como string
+        order_by = None
+        if hasattr(self.sql_parser, 'get_order_by'):
+            order_by = self.sql_parser.get_order_by()
+        
+        needs_numeric_conversion = False
+        if order_by:
+            # Lista de campos que suelen ser numéricos pero pueden estar como string
+            numeric_fields = ['salario', 'precio', 'cantidad', 'edad', 'id', 'numero', 'monto', 'total']
+            
+            for field_name in order_by.keys():
+                if any(numeric_field in field_name.lower() for numeric_field in numeric_fields):
+                    needs_numeric_conversion = True
+                    logger.info(f" Campo numérico detectado para ORDER BY: {field_name}")
+                    break
+        
+        # 🔧 NUEVO: 2.5. Agregar conversión de tipos si es necesario para ORDER BY
+        if needs_numeric_conversion and order_by:
+            conversion_stage = {"$addFields": {}}
+            
+            for field_name in order_by.keys():
+                numeric_fields = ['salario', 'precio', 'cantidad', 'edad', 'id', 'numero', 'monto', 'total']
+                if any(numeric_field in field_name.lower() for numeric_field in numeric_fields):
+                    # Crear campo temporal numérico para ordenamiento
+                    conversion_stage["$addFields"][f"{field_name}_numeric"] = {
+                        "$convert": {
+                            "input": f"${field_name}",
+                            "to": "double",
+                            "onError": 0,  # Si falla la conversión, usar 0
+                            "onNull": 0    # Si es null, usar 0
+                        }
+                    }
+                    logger.info(f" Conversión agregada: {field_name} -> {field_name}_numeric")
+            
+            if conversion_stage["$addFields"]:
+                pipeline.append(conversion_stage)
+        
+        # 🆕 3. Manejar DISTINCT si está presente
         if self.sql_parser.has_distinct():
             distinct_pipeline = self._build_distinct_pipeline()
             pipeline.extend(distinct_pipeline)
         
-        # 🆕 3. Etapa $group (GROUP BY y funciones de agregación)
+        # 🆕 4. Etapa $group (GROUP BY y funciones de agregación)
         group_stage = self._build_group_stage()
         if group_stage:
             pipeline.append(group_stage)
         
-        # 🆕 4. Etapa $match para HAVING (después de $group)
+        # 🆕 5. Etapa $match para HAVING (después de $group)
         if self.sql_parser.has_having():
             having_clause = self.sql_parser.get_having_clause()
             if having_clause:
@@ -246,54 +283,79 @@ class SQLToMongoDBTranslator:
                     "$match": having_clause
                 })
         
-        # 🆕 5. Proyección con funciones SQL
+        # 🆕 6. Proyección con funciones SQL
         project_stage = self._build_project_stage()
         if project_stage:
             pipeline.append(project_stage)
         
-        # ✅ 6. CORREGIDO: Etapa $sort para ORDER BY
-        if hasattr(self.sql_parser, 'get_order_by'):
-            order_by = self.sql_parser.get_order_by()
-            if order_by:
-                logger.info(f" ORDER BY en aggregate detectado: {order_by}, tipo: {type(order_by)}")
-                
-                sort_stage = {"$sort": {}}
-                
-                # ✅ NUEVO: Manejar diferentes formatos de ORDER BY
-                if isinstance(order_by, dict):
-                    # Si ya es un diccionario como {'edad': -1, 'nombre': 1}
-                    sort_stage["$sort"] = order_by
-                    logger.info(f" ORDER BY aplicado directamente: {order_by}")
+        # ✅ 7. CORREGIDO: Etapa $sort para ORDER BY con conversión numérica
+        if order_by:
+            logger.info(f" ORDER BY en aggregate detectado: {order_by}, tipo: {type(order_by)}")
+            
+            sort_stage = {"$sort": {}}
+            
+            # ✅ NUEVO: Manejar diferentes formatos de ORDER BY
+            if isinstance(order_by, dict):
+                # Si ya es un diccionario como {'salario': -1}
+                for field_name, direction in order_by.items():
+                    # 🔧 CLAVE: Usar campo convertido si existe
+                    if needs_numeric_conversion:
+                        numeric_fields = ['salario', 'precio', 'cantidad', 'edad', 'id', 'numero', 'monto', 'total']
+                        if any(numeric_field in field_name.lower() for numeric_field in numeric_fields):
+                            sort_field = f"{field_name}_numeric"
+                            logger.info(f" Usando campo convertido para ORDER BY: {sort_field}")
+                        else:
+                            sort_field = field_name
+                    else:
+                        sort_field = field_name
                     
-                elif isinstance(order_by, list):
-                    # Si es una lista de objetos [{"field": "edad", "order": "DESC"}]
-                    for order_info in order_by:
-                        if isinstance(order_info, dict):
-                            field = order_info.get("field")
-                            direction = order_info.get("order", "ASC")
-                            if field:
-                                sort_stage["$sort"][field] = -1 if direction.upper() == "DESC" else 1
-                        elif isinstance(order_info, str):
-                            # Si es un string simple
-                            sort_stage["$sort"][order_info] = 1
-                    
-                    logger.info(f"📊 ORDER BY procesado desde lista: {sort_stage['$sort']}")
+                    sort_stage["$sort"][sort_field] = direction
                 
-                else:
-                    # Fallback para otros tipos
-                    logger.warning(f"⚠️ Tipo inesperado ORDER BY en aggregate: {type(order_by)}")
-                    try:
-                        sort_stage["$sort"] = order_by
-                    except Exception as e:
-                        logger.error(f"❌ Error procesando ORDER BY en aggregate: {e}")
-                        sort_stage = None
+                logger.info(f" ORDER BY aplicado: {sort_stage['$sort']}")
                 
-                # Solo agregar si se configuró correctamente
-                if sort_stage and sort_stage["$sort"]:
-                    pipeline.append(sort_stage)
-                    logger.info(f" $sort agregado al pipeline: {sort_stage}")
+            elif isinstance(order_by, list):
+                # Si es una lista de objetos [{"field": "salario", "order": "DESC"}]
+                for order_info in order_by:
+                    if isinstance(order_info, dict):
+                        field = order_info.get("field")
+                        direction = order_info.get("order", "ASC")
+                        if field:
+                            # Usar campo convertido si es necesario
+                            if needs_numeric_conversion:
+                                numeric_fields = ['salario', 'precio', 'cantidad', 'edad', 'id', 'numero', 'monto', 'total']
+                                if any(numeric_field in field.lower() for numeric_field in numeric_fields):
+                                    sort_field = f"{field}_numeric"
+                                else:
+                                    sort_field = field
+                            else:
+                                sort_field = field
+                            
+                            sort_stage["$sort"][sort_field] = -1 if direction.upper() == "DESC" else 1
+                    elif isinstance(order_info, str):
+                        # Si es un string simple
+                        sort_stage["$sort"][order_info] = 1
+                
+                logger.info(f" ORDER BY procesado desde lista: {sort_stage['$sort']}")
+            
+            # Solo agregar si se configuró correctamente
+            if sort_stage["$sort"]:
+                pipeline.append(sort_stage)
+                logger.info(f" $sort agregado al pipeline: {sort_stage}")
         
-        # ✅ 7. CORREGIDO: Etapa $limit para LIMIT
+        # 🔧 NUEVO: 7.5. Limpiar campos temporales de conversión si se agregaron
+        if needs_numeric_conversion and order_by:
+            cleanup_stage = {"$unset": []}
+            
+            for field_name in order_by.keys():
+                numeric_fields = ['salario', 'precio', 'cantidad', 'edad', 'id', 'numero', 'monto', 'total']
+                if any(numeric_field in field_name.lower() for numeric_field in numeric_fields):
+                    cleanup_stage["$unset"].append(f"{field_name}_numeric")
+            
+            if cleanup_stage["$unset"]:
+                pipeline.append(cleanup_stage)
+                logger.info(f" Limpiando campos temporales: {cleanup_stage['$unset']}")
+        
+        # ✅ 8. CORREGIDO: Etapa $limit para LIMIT
         if hasattr(self.sql_parser, 'get_limit'):
             limit = self.sql_parser.get_limit()
             if limit is not None:
@@ -315,8 +377,6 @@ class SQLToMongoDBTranslator:
         logger.info(f" Pipeline completo generado: {len(pipeline)} etapas")
         return result
 
-
-    # 🆕 =================== NUEVOS MÉTODOS PARA CARACTERÍSTICAS AVANZADAS ===================
     
     def _translate_select_with_joins(self):
         """
@@ -562,10 +622,10 @@ class SQLToMongoDBTranslator:
         return group_stage
 
 
-
     def _build_project_stage(self):
         """
         ✅ CORREGIDO: Construye la etapa $project para funciones de transformación.
+        Incluye conversión automática de string a Date para funciones de fecha.
         """
         select_fields = self.sql_parser.get_select_fields()
         
@@ -602,8 +662,54 @@ class SQLToMongoDBTranslator:
                     
                     logger.info(f"Procesando campo: '{field}' con alias: '{alias}'")
                     
+                    # 🔧 FUNCIÓN YEAR - CORREGIDA con conversión de string a Date
+                    if "YEAR(" in field_upper:
+                        match = regex.search(r'YEAR\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            # Convertir string a Date y luego extraer el año
+                            project_stage["$project"][alias] = {
+                                "$year": {
+                                    "$dateFromString": {
+                                        "dateString": f"${inner_field}",
+                                        "onError": None  # Si falla la conversión, devolver null
+                                    }
+                                }
+                            }
+                            logger.info(f"YEAR({inner_field}) traducido a $year con conversión de string")
+                    
+                    # 🔧 FUNCIÓN MONTH - CORREGIDA con conversión de string a Date
+                    elif "MONTH(" in field_upper:
+                        match = regex.search(r'MONTH\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            project_stage["$project"][alias] = {
+                                "$month": {
+                                    "$dateFromString": {
+                                        "dateString": f"${inner_field}",
+                                        "onError": None
+                                    }
+                                }
+                            }
+                            logger.info(f"MONTH({inner_field}) traducido a $month con conversión de string")
+                    
+                    # 🔧 FUNCIÓN DAY - CORREGIDA con conversión de string a Date
+                    elif "DAY(" in field_upper:
+                        match = regex.search(r'DAY\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            project_stage["$project"][alias] = {
+                                "$dayOfMonth": {
+                                    "$dateFromString": {
+                                        "dateString": f"${inner_field}",
+                                        "onError": None
+                                    }
+                                }
+                            }
+                            logger.info(f"DAY({inner_field}) traducido a $dayOfMonth con conversión de string")
+                    
                     # 🔧 FUNCIÓN CONCAT
-                    if "CONCAT(" in field_upper:
+                    elif "CONCAT(" in field_upper:
                         concat_expression = self._translate_concat_function(field)
                         if concat_expression:
                             project_stage["$project"][alias] = concat_expression
@@ -652,7 +758,6 @@ class SQLToMongoDBTranslator:
             return project_stage
         
         return None
-
 
     def _translate_concat_function(self, field):
         """
@@ -996,6 +1101,7 @@ class SQLToMongoDBTranslator:
     def translate_update(self):
         """
         Traduce una consulta UPDATE a operaciones de MongoDB.
+        🔧 CORREGIDO: Usa aggregate + $merge para operaciones matemáticas complejas
         
         Returns:
             dict: Diccionario con la operación MongoDB
@@ -1012,14 +1118,305 @@ class SQLToMongoDBTranslator:
         if not update_values:
             raise ValueError("No se pudieron extraer valores para actualizar")
         
-        return {
-            "operation": "update",
-            "collection": collection,
-            "query": {
-                "query": where_clause or {},
-                "update": {"$set": update_values["values"]}
+        # 🔧 NUEVO: Detectar si hay operaciones matemáticas que requieren cálculo
+        has_math_operations = self._has_math_operations(update_values["values"])
+        
+        if has_math_operations:
+            # Usar aggregate + $merge para operaciones matemáticas
+            return self._translate_update_with_aggregate(collection, update_values["values"], where_clause)
+        else:
+            # Usar update normal para valores simples
+            return {
+                "operation": "update",
+                "collection": collection,
+                "query": {
+                    "query": where_clause or {},
+                    "update": {"$set": update_values["values"]}
+                }
+            }
+
+    def _has_math_operations(self, update_values):
+        """
+        Detecta si hay operaciones matemáticas en los valores de UPDATE.
+        
+        Args:
+            update_values (dict): Valores a actualizar
+            
+        Returns:
+            bool: True si hay operaciones matemáticas
+        """
+        for field, value in update_values.items():
+            value_str = str(value).strip()
+            if any(op in value_str for op in [" * ", " + ", " - ", " / "]):
+                return True
+        return False
+
+    def _translate_update_with_aggregate(self, collection, update_values, where_clause):
+        """
+        🔧 NUEVO: Traduce UPDATE con operaciones matemáticas usando aggregate + $merge.
+        
+        Args:
+            collection (str): Nombre de la colección
+            update_values (dict): Valores a actualizar
+            where_clause (dict): Condición WHERE
+            
+        Returns:
+            dict: Operación usando aggregate con $merge
+        """
+        pipeline = []
+        
+        # 1. $match para filtrar documentos a actualizar
+        if where_clause:
+            pipeline.append({"$match": where_clause})
+        
+        # 2. $addFields para calcular nuevos valores
+        add_fields_stage = {"$addFields": {}}
+        
+        for field, value in update_values.items():
+            value_str = str(value).strip()
+            
+            logger.info(f"Procesando operación matemática: {field} = {value_str}")
+            
+            # 🔧 DETECTAR MULTIPLICACIÓN: campo * número
+            if " * " in value_str:
+                multiplication_pattern = r'(\w+)\s*\*\s*([\d.]+)'
+                match = regex.search(multiplication_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    multiplier = float(match.group(2).strip())
+                    
+                    if source_field.lower() == field.lower():
+                        # salario = salario * 1.15
+                        add_fields_stage["$addFields"][field] = {
+                            "$multiply": [
+                                {"$toDouble": f"${source_field}"},
+                                multiplier
+                            ]
+                        }
+                        logger.info(f" Multiplicación: {field} = {source_field} * {multiplier}")
+            
+            # 🔧 DETECTAR SUMA: campo + número
+            elif " + " in value_str:
+                addition_pattern = r'(\w+)\s*\+\s*([\d.]+)'
+                match = regex.search(addition_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    increment = float(match.group(2).strip())
+                    
+                    add_fields_stage["$addFields"][field] = {
+                        "$add": [
+                            {"$toDouble": f"${source_field}"},
+                            increment
+                        ]
+                    }
+                    logger.info(f" Suma: {field} = {source_field} + {increment}")
+            
+            # 🔧 DETECTAR RESTA: campo - número
+            elif " - " in value_str:
+                subtraction_pattern = r'(\w+)\s*-\s*([\d.]+)'
+                match = regex.search(subtraction_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    decrement = float(match.group(2).strip())
+                    
+                    add_fields_stage["$addFields"][field] = {
+                        "$subtract": [
+                            {"$toDouble": f"${source_field}"},
+                            decrement
+                        ]
+                    }
+                    logger.info(f" Resta: {field} = {source_field} - {decrement}")
+            
+            # 🔧 DETECTAR DIVISIÓN: campo / número
+            elif " / " in value_str:
+                division_pattern = r'(\w+)\s*/\s*([\d.]+)'
+                match = regex.search(division_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    divisor = float(match.group(2).strip())
+                    
+                    add_fields_stage["$addFields"][field] = {
+                        "$divide": [
+                            {"$toDouble": f"${source_field}"},
+                            divisor
+                        ]
+                    }
+                    logger.info(f" División: {field} = {source_field} / {divisor}")
+            
+            else:
+                # Valor literal
+                try:
+                    if '.' in value_str:
+                        numeric_value = float(value_str)
+                    else:
+                        numeric_value = int(value_str)
+                    add_fields_stage["$addFields"][field] = numeric_value
+                    logger.info(f" Valor literal: {field} = {numeric_value}")
+                except ValueError:
+                    add_fields_stage["$addFields"][field] = value_str
+                    logger.info(f" Valor string: {field} = '{value_str}'")
+        
+        if add_fields_stage["$addFields"]:
+            pipeline.append(add_fields_stage)
+        
+        # 3. $merge para actualizar los documentos en la misma colección
+        merge_stage = {
+            "$merge": {
+                "into": collection,
+                "whenMatched": "replace",
+                "whenNotMatched": "discard"
             }
         }
+        pipeline.append(merge_stage)
+        
+        logger.info(f"Pipeline UPDATE con cálculo: {pipeline}")
+        
+        return {
+            "operation": "aggregate",
+            "collection": collection,
+            "pipeline": pipeline,
+            "update_type": "math_operations"
+        }
+
+    def _process_update_operations(self, update_values):
+        """
+        🔧 CORREGIDO: Procesa operaciones matemáticas en UPDATE SET.
+        Incluye conversión automática de string a número para operaciones matemáticas.
+        
+        Args:
+            update_values (dict): Valores a actualizar del parser
+            
+        Returns:
+            dict: Operaciones MongoDB procesadas
+        """
+        mongo_update = {}
+        set_operations = {}
+        
+        for field, value in update_values.items():
+            # Convertir a string para procesar
+            value_str = str(value).strip()
+            
+            logger.info(f" Procesando actualización: {field} = {value_str}")
+            
+            # 🔧 DETECTAR MULTIPLICACIÓN: campo * número
+            if " * " in value_str:
+                # Patrón: salario * 1.15, precio * 0.9, etc.
+                multiplication_pattern = r'(\w+)\s*\*\s*([\d.]+)'
+                match = regex.search(multiplication_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    multiplier = float(match.group(2).strip())
+                    
+                    # Verificar que el campo fuente sea el mismo que se está actualizando
+                    if source_field.lower() == field.lower():
+                        # 🔧 CLAVE: Usar $set con conversión y multiplicación para manejar strings
+                        set_operations[field] = {
+                            "$multiply": [
+                                {"$toDouble": f"${source_field}"},  # Convertir string a número
+                                multiplier
+                            ]
+                        }
+                        logger.info(f" Multiplicación con conversión: {field} = toDouble(${source_field}) * {multiplier}")
+                    else:
+                        # Si es diferente, usar $set con $multiply
+                        set_operations[field] = {
+                            "$multiply": [
+                                {"$toDouble": f"${source_field}"},
+                                multiplier
+                            ]
+                        }
+                        logger.info(f" Multiplicación cruzada con conversión: {field} = toDouble(${source_field}) * {multiplier}")
+                    continue
+            
+            # 🔧 DETECTAR SUMA: campo + número
+            elif " + " in value_str:
+                addition_pattern = r'(\w+)\s*\+\s*([\d.]+)'
+                match = regex.search(addition_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    increment = float(match.group(2).strip())
+                    
+                    set_operations[field] = {
+                        "$add": [
+                            {"$toDouble": f"${source_field}"},
+                            increment
+                        ]
+                    }
+                    logger.info(f" Suma con conversión: {field} = toDouble(${source_field}) + {increment}")
+                    continue
+            
+            # 🔧 DETECTAR RESTA: campo - número
+            elif " - " in value_str:
+                subtraction_pattern = r'(\w+)\s*-\s*([\d.]+)'
+                match = regex.search(subtraction_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    decrement = float(match.group(2).strip())
+                    
+                    set_operations[field] = {
+                        "$subtract": [
+                            {"$toDouble": f"${source_field}"},
+                            decrement
+                        ]
+                    }
+                    logger.info(f" Resta con conversión: {field} = toDouble(${source_field}) - {decrement}")
+                    continue
+            
+            # 🔧 DETECTAR DIVISIÓN: campo / número
+            elif " / " in value_str:
+                division_pattern = r'(\w+)\s*/\s*([\d.]+)'
+                match = regex.search(division_pattern, value_str, regex.IGNORECASE)
+                
+                if match:
+                    source_field = match.group(1).strip()
+                    divisor = float(match.group(2).strip())
+                    
+                    set_operations[field] = {
+                        "$divide": [
+                            {"$toDouble": f"${source_field}"},
+                            divisor
+                        ]
+                    }
+                    logger.info(f" División con conversión: {field} = toDouble(${source_field}) / {divisor}")
+                    continue
+            
+            # Si no es una operación matemática, es un valor literal
+            else:
+                # Intentar convertir a número si es posible
+                try:
+                    if '.' in value_str:
+                        numeric_value = float(value_str)
+                    else:
+                        numeric_value = int(value_str)
+                    set_operations[field] = numeric_value
+                    logger.info(f" Valor numérico: {field} = {numeric_value}")
+                except ValueError:
+                    # Es un string
+                    set_operations[field] = value_str
+                    logger.info(f" Valor string: {field} = '{value_str}'")
+        
+        # 🔧 CONSTRUIR OPERACIÓN MONGODB FINAL
+        # Solo usar $set ya que estamos manejando las conversiones manualmente
+        
+        if set_operations:
+            mongo_update["$set"] = set_operations
+            logger.info(f" Operaciones $set: {set_operations}")
+        
+        # Si no hay operaciones específicas, usar $set por defecto
+        if not mongo_update:
+            mongo_update["$set"] = update_values
+            logger.warning(" No se detectaron operaciones matemáticas, usando $set por defecto")
+        
+        logger.info(f" Operación UPDATE final: {mongo_update}")
+        return mongo_update
+
 
     def translate_delete(self):
         """

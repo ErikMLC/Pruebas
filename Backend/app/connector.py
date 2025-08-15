@@ -228,81 +228,6 @@ class MongoDBConnector:
             except:
                 return []
 
-    def execute_query(self, collection_name, query):
-        """
-        Ejecuta una consulta en MongoDB.
-        🔧 ACTUALIZADO: Soporte para INSERT_MANY
-        
-        Args:
-            collection_name (str): Nombre de la colección.
-            query (dict): Consulta en formato MongoDB.
-            
-        Returns:
-            Resultado de la consulta.
-        """
-        max_retries = 3
-        retry_count = 0
-        
-        while retry_count < max_retries:
-            try:
-                # Verificar si hay una base de datos seleccionada
-                if not self.is_database_selected():
-                    raise ValueError("No se ha seleccionado ninguna base de datos. Use set_database() primero.")
-                
-                # Verificar si la colección existe y crearla si es necesario
-                if collection_name not in self.db.list_collection_names():
-                    # Si la colección no existe, verificar si es una operación de creación
-                    if query.get("operation") == "create_collection":
-                        # Crear la colección explícitamente
-                        options = query.get("options", {})
-                        self.db.create_collection(collection_name, **options)
-                        return {"created": True, "collection_name": collection_name}
-                    else:
-                        # Para otras operaciones, crear la colección vacía automáticamente
-                        logger.warning(f"La colección {collection_name} no existe. Se creará automáticamente.")
-                
-                collection = self.db[collection_name]
-                operation = query.get("operation")
-                logger.info(f"Ejecutando operación {operation} en la colección {collection_name}")
-                
-                # Manejar cada tipo de operación
-                if operation == "find":
-                    return self._execute_find(collection, query)
-                elif operation == "aggregate":
-                    return self._execute_aggregate(collection, query)
-                elif operation == "insert":
-                    return self._execute_insert(collection, query)
-                elif operation == "INSERT_MANY":
-                    # 🔧 NUEVO: Soporte para INSERT múltiple
-                    return self._execute_insert_many(collection, query)
-                elif operation == "update":
-                    return self._execute_update(collection, query)
-                elif operation == "delete":
-                    return self._execute_delete(collection, query)
-                elif operation == "create_collection":
-                    # Ya manejado arriba si la colección no existe
-                    return {"created": True, "collection_name": collection_name}
-                elif operation == "drop_collection":
-                    return self._execute_drop_collection(collection)
-                else:
-                    raise ValueError(f"Operación no soportada: {operation}")
-                
-            except Exception as e:
-                logger.error(f"Error al ejecutar consulta (intento {retry_count+1}): {e}")
-                retry_count += 1
-                
-                if "MongoClient after close" in str(e) or "not connected" in str(e).lower():
-                    logger.warning("Detectado error de conexión. Intentando reconectar...")
-                    self._try_reconnect()
-                    time.sleep(1)  # Esperar un momento antes de reintentar
-                elif retry_count >= max_retries:
-                    import traceback
-                    logger.error(traceback.format_exc())
-                    raise
-                else:
-                    time.sleep(0.5)  # Esperar un poco antes de reintentar para otros errores
-        
-        raise Exception("Se excedió el número máximo de intentos de consulta")
     
     def _serialize_results(self, results):
         """
@@ -764,18 +689,11 @@ class MongoDBConnector:
                 "error": str(e)
             }
 
-    # Método modificado para manejar create_collection_with_schema
+
     def execute_query(self, collection_name, query):
         """
         Ejecuta una consulta en MongoDB.
-        🔧 ACTUALIZADO: Soporte para CREATE TABLE con esquema
-        
-        Args:
-            collection_name (str): Nombre de la colección.
-            query (dict): Consulta en formato MongoDB.
-            
-        Returns:
-            Resultado de la consulta.
+        🔧 ACTUALIZADO: Soporte para UPDATE con aggregate + $merge
         """
         max_retries = 3
         retry_count = 0
@@ -786,47 +704,20 @@ class MongoDBConnector:
                 if not self.is_database_selected():
                     raise ValueError("No se ha seleccionado ninguna base de datos. Use set_database() primero.")
                 
+                collection = self.db[collection_name]
                 operation = query.get("operation")
                 logger.info(f"Ejecutando operación {operation} en la colección {collection_name}")
                 
-                # 🆕 NUEVO: Manejar create_collection_with_schema
-                if operation == "create_collection_with_schema":
-                    options = query.get("options", {})
-                    indexes = query.get("indexes_to_create", [])
-                    
-                    result = self.create_collection_with_schema(collection_name, options, indexes)
-                    
-                    # Si hay documento de ejemplo, insertarlo
-                    sample_document = query.get("sample_document")
-                    if sample_document:
-                        try:
-                            sample_result = self.insert_sample_document(collection_name, sample_document)
-                            result["sample_document_inserted"] = sample_result
-                        except Exception as e:
-                            logger.warning(f"No se pudo insertar documento de ejemplo: {e}")
-                            result["sample_document_error"] = str(e)
-                    
-                    return result
-                
-                # Verificar si la colección existe para otras operaciones
-                if collection_name not in self.db.list_collection_names():
-                    # Si la colección no existe, verificar si es una operación de creación
-                    if operation == "create_collection":
-                        # Crear la colección explícitamente
-                        options = query.get("options", {})
-                        self.db.create_collection(collection_name, **options)
-                        return {"created": True, "collection_name": collection_name}
-                    else:
-                        # Para otras operaciones, crear la colección vacía automáticamente
-                        logger.warning(f"La colección {collection_name} no existe. Se creará automáticamente.")
-                
-                collection = self.db[collection_name]
-                
-                # Manejar cada tipo de operación (resto del código igual)
+                # Manejar cada tipo de operación
                 if operation == "find":
                     return self._execute_find(collection, query)
                 elif operation == "aggregate":
-                    return self._execute_aggregate(collection, query)
+                    # 🔧 NUEVO: Verificar si es un UPDATE con aggregate
+                    if query.get("update_type") == "math_operations":
+                        logger.info("🔢 Ejecutando UPDATE con operaciones matemáticas usando aggregate")
+                        return self._execute_aggregate_update(collection, query)
+                    else:
+                        return self._execute_aggregate(collection, query)
                 elif operation == "insert":
                     return self._execute_insert(collection, query)
                 elif operation == "INSERT_MANY":
@@ -835,14 +726,28 @@ class MongoDBConnector:
                     return self._execute_update(collection, query)
                 elif operation == "delete":
                     return self._execute_delete(collection, query)
+                elif operation == "create_collection_with_schema":
+                    options = query.get("options", {})
+                    indexes = query.get("indexes_to_create", [])
+                    result = self.create_collection_with_schema(collection_name, options, indexes)
+                    sample_document = query.get("sample_document")
+                    if sample_document:
+                        try:
+                            sample_result = self.insert_sample_document(collection_name, sample_document)
+                            result["sample_document_inserted"] = sample_result
+                        except Exception as e:
+                            logger.warning(f"No se pudo insertar documento de ejemplo: {e}")
+                            result["sample_document_error"] = str(e)
+                    return result
                 elif operation == "create_collection":
-                    # Ya manejado arriba si la colección no existe
+                    options = query.get("options", {})
+                    self.db.create_collection(collection_name, **options)
                     return {"created": True, "collection_name": collection_name}
                 elif operation == "drop_collection":
                     return self._execute_drop_collection(collection)
                 else:
                     raise ValueError(f"Operación no soportada: {operation}")
-                
+                    
             except Exception as e:
                 logger.error(f"Error al ejecutar consulta (intento {retry_count+1}): {e}")
                 retry_count += 1
@@ -859,6 +764,36 @@ class MongoDBConnector:
                     time.sleep(0.5)
         
         raise Exception("Se excedió el número máximo de intentos de consulta")
+
+
+    def _execute_aggregate_update(self, collection, query):
+        """
+        🔧 NUEVO: Ejecuta UPDATE usando aggregate con $merge.
+        
+        Args:
+            collection: Colección de MongoDB
+            query: Consulta con pipeline de agregación para UPDATE
+            
+        Returns:
+            dict: Resultado de la operación
+        """
+        pipeline = query.get("pipeline", [])
+        logger.info(f" Ejecutando UPDATE con pipeline de agregación: {pipeline}")
+        
+        # Ejecutar el pipeline (el $merge actualiza automáticamente)
+        list(collection.aggregate(pipeline))
+        
+        # Simular respuesta de update para compatibilidad
+        # En un UPDATE real, deberíamos contar los documentos afectados
+        # pero con aggregate+$merge es más complejo obtener esta información
+        
+        return {
+            "acknowledged": True,
+            "matched_count": "N/A - aggregate operation",
+            "modified_count": "N/A - aggregate operation", 
+            "update_method": "aggregate_with_merge",
+            "message": "UPDATE ejecutado usando aggregate + $merge para operaciones matemáticas"
+        }
 
     def _execute_drop_collection(self, collection):
         """
