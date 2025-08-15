@@ -482,6 +482,7 @@ class SQLToMongoDBTranslator:
     def _build_group_stage(self):
         """
         ✅ CORREGIDO: Construye la etapa $group del pipeline para agregaciones.
+        Maneja correctamente SUM con operaciones matemáticas como precio * stock.
         """
         group_stage = None
         
@@ -498,12 +499,7 @@ class SQLToMongoDBTranslator:
             if isinstance(field_info, dict) and "field" in field_info:
                 field = field_info["field"].upper().strip()
                 
-                # 🔧 DETECTAR COUNT(*) específicamente
-                if field == "COUNT(*)":
-                    has_aggregation = True
-                    break
-                
-                # Detectar otras funciones de agregación
+                # Detectar cualquier función de agregación
                 agg_functions = ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]
                 if any(func in field for func in agg_functions):
                     has_aggregation = True
@@ -517,115 +513,162 @@ class SQLToMongoDBTranslator:
                 if isinstance(field_info, dict) and "field" in field_info:
                     field = field_info["field"]
                     field_upper = field.upper().strip()
-                    alias = field_info.get("alias", "count_all")
+                    alias = field_info.get("alias", field)
                     
-                    logger.info(f" Procesando campo: {field}")
+                    logger.info(f" Procesando campo de agregación: {field}")
                     
-                    # 🔧 MANEJAR COUNT(*) específicamente
+                    # 🔧 COUNT(*) - Conteo total
                     if field_upper == "COUNT(*)":
-                        group_stage["$group"][alias] = {"$sum": 1}
-                        logger.info(f" COUNT(*) configurado como $sum: 1 con alias '{alias}'")
+                        group_field_name = alias if alias != field else "count_all"
+                        group_stage["$group"][group_field_name] = {"$sum": 1}
+                        logger.info(f" COUNT(*) configurado: {group_field_name}")
                     
-                    # Manejar otras funciones de agregación
+                    # 🔧 COUNT(DISTINCT campo) - Conteo de valores únicos
+                    elif "COUNT(DISTINCT " in field_upper:
+                        match = regex.search(r'COUNT\s*\(\s*DISTINCT\s+([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            distinct_field = match.group(1).strip()
+                            group_field_name = alias if alias != field else f"count_distinct_{distinct_field}"
+                            
+                            # Para COUNT DISTINCT, usar $addToSet seguido de $size
+                            group_stage["$group"][f"{group_field_name}_set"] = {"$addToSet": f"${distinct_field}"}
+                            logger.info(f" COUNT(DISTINCT {distinct_field}) configurado: {group_field_name}")
+                    
+                    # 🔧 COUNT(campo) - Conteo con condición
                     elif "COUNT(" in field_upper:
-                        # COUNT(campo) - extraer campo entre paréntesis
-                        import re
                         match = regex.search(r'COUNT\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
                             inner_field = match.group(1).strip()
+                            group_field_name = alias if alias != field else f"count_{inner_field}"
                             if inner_field != "*":
-                                group_stage["$group"][alias] = {
+                                group_stage["$group"][group_field_name] = {
                                     "$sum": {"$cond": [{"$ne": [f"${inner_field}", None]}, 1, 0]}
                                 }
                             else:
-                                group_stage["$group"][alias] = {"$sum": 1}
-                        logger.info(f"✅ COUNT({inner_field if 'inner_field' in locals() else '*'}) configurado")
+                                group_stage["$group"][group_field_name] = {"$sum": 1}
+                            logger.info(f" COUNT({inner_field}) configurado: {group_field_name}")
                     
-                    # Otras funciones (SUM, AVG, etc.)
-
+                    # 🔧 SUM(campo) - CORREGIDO PARA OPERACIONES MATEMÁTICAS
                     elif "SUM(" in field_upper:
-                        # SUM(campo) o SUM(campo1 * campo2) - extraer expresión entre paréntesis
                         match = regex.search(r'SUM\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
                             inner_expression = match.group(1).strip()
+                            group_field_name = alias if alias != field else f"sum_{inner_expression.replace(' ', '_').replace('*', '_mult_')}"
                             
-                            # 🔧 NUEVO: Detectar multiplicación
+                            logger.info(f" Analizando expresión SUM: '{inner_expression}'")
+                            
+                            # 🔧 CRÍTICO: Detectar multiplicación precio * stock
                             if '*' in inner_expression:
-                                # SUM(campo1 * campo2)
                                 parts = [p.strip() for p in inner_expression.split('*')]
                                 if len(parts) == 2:
                                     field1 = parts[0]
                                     field2 = parts[1]
-                                    group_stage["$group"][alias] = {
-                                        "$sum": {"$multiply": [f"${field1}", f"${field2}"]}
+                                    
+                                    # Convertir a números si es necesario y multiplicar
+                                    group_stage["$group"][group_field_name] = {
+                                        "$sum": {
+                                            "$multiply": [
+                                                {"$toDouble": f"${field1}"},
+                                                {"$toDouble": f"${field2}"}
+                                            ]
+                                        }
                                     }
-                                    logger.info(f"SUM con multiplicación configurado: {field1} * {field2}")
+                                    logger.info(f" SUM con multiplicación: {field1} * {field2} -> {group_field_name}")
                                 else:
                                     # Más de 2 campos - manejo básico
-                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                                    group_stage["$group"][group_field_name] = {"$sum": f"${inner_expression}"}
+                                    logger.warning(f" Multiplicación compleja: {inner_expression}")
                             
+                            # 🔧 Detectar suma: campo1 + campo2
                             elif '+' in inner_expression:
-                                # SUM(campo1 + campo2)
                                 parts = [p.strip() for p in inner_expression.split('+')]
                                 if len(parts) == 2:
                                     field1 = parts[0]
                                     field2 = parts[1]
-                                    group_stage["$group"][alias] = {
-                                        "$sum": {"$add": [f"${field1}", f"${field2}"]}
+                                    group_stage["$group"][group_field_name] = {
+                                        "$sum": {
+                                            "$add": [
+                                                {"$toDouble": f"${field1}"},
+                                                {"$toDouble": f"${field2}"}
+                                            ]
+                                        }
                                     }
-                                    logger.info(f"SUM con suma configurado: {field1} + {field2}")
+                                    logger.info(f" SUM con suma: {field1} + {field2} -> {group_field_name}")
                                 else:
-                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                                    group_stage["$group"][group_field_name] = {"$sum": f"${inner_expression}"}
                             
+                            # 🔧 Detectar resta: campo1 - campo2
                             elif '-' in inner_expression:
-                                # SUM(campo1 - campo2)
                                 parts = [p.strip() for p in inner_expression.split('-')]
                                 if len(parts) == 2:
                                     field1 = parts[0]
                                     field2 = parts[1]
-                                    group_stage["$group"][alias] = {
-                                        "$sum": {"$subtract": [f"${field1}", f"${field2}"]}
+                                    group_stage["$group"][group_field_name] = {
+                                        "$sum": {
+                                            "$subtract": [
+                                                {"$toDouble": f"${field1}"},
+                                                {"$toDouble": f"${field2}"}
+                                            ]
+                                        }
                                     }
-                                    logger.info(f"SUM con resta configurado: {field1} - {field2}")
+                                    logger.info(f" SUM con resta: {field1} - {field2} -> {group_field_name}")
                                 else:
-                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                                    group_stage["$group"][group_field_name] = {"$sum": f"${inner_expression}"}
                             
                             else:
-                                # SUM(campo) simple
+                                # SUM(campo) simple sin operaciones
                                 if inner_expression != "*":
-                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                                    # Convertir a número por si acaso
+                                    group_stage["$group"][group_field_name] = {
+                                        "$sum": {"$toDouble": f"${inner_expression}"}
+                                    }
                                 else:
-                                    group_stage["$group"][alias] = {"$sum": 1}
-                                
-                            logger.info(f"SUM({inner_expression}) configurado con alias '{alias}'")
-
+                                    group_stage["$group"][group_field_name] = {"$sum": 1}
+                                logger.info(f" SUM simple: {inner_expression} -> {group_field_name}")
+                    
+                    # 🔧 AVG(campo)
                     elif "AVG(" in field_upper:
                         match = regex.search(r'AVG\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
                             inner_field = match.group(1).strip()
-                            group_stage["$group"][alias] = {"$avg": f"${inner_field}"}
+                            group_field_name = alias if alias != field else f"avg_{inner_field}"
+                            # Convertir a número para promedio
+                            group_stage["$group"][group_field_name] = {
+                                "$avg": {"$toDouble": f"${inner_field}"}
+                            }
+                            logger.info(f" AVG({inner_field}) configurado: {group_field_name}")
                     
+                    # 🔧 MIN(campo)
                     elif "MIN(" in field_upper:
                         match = regex.search(r'MIN\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
                             inner_field = match.group(1).strip()
-                            group_stage["$group"][alias] = {"$min": f"${inner_field}"}
+                            group_field_name = alias if alias != field else f"min_{inner_field}"
+                            # Convertir a número para comparación
+                            group_stage["$group"][group_field_name] = {
+                                "$min": {"$toDouble": f"${inner_field}"}
+                            }
+                            logger.info(f" MIN({inner_field}) configurado: {group_field_name}")
                     
+                    # 🔧 MAX(campo)
                     elif "MAX(" in field_upper:
                         match = regex.search(r'MAX\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
                             inner_field = match.group(1).strip()
-                            group_stage["$group"][alias] = {"$max": f"${inner_field}"}
+                            group_field_name = alias if alias != field else f"max_{inner_field}"
+                            # Convertir a número para comparación
+                            group_stage["$group"][group_field_name] = {
+                                "$max": {"$toDouble": f"${inner_field}"}
+                            }
+                            logger.info(f" MAX({inner_field}) configurado: {group_field_name}")
             
-            logger.info(f" Etapa $group generada: {group_stage}")
+            logger.info(f" Etapa $group con múltiples agregaciones generada: {group_stage}")
         
         return group_stage
 
-
     def _build_project_stage(self):
         """
-        ✅ CORREGIDO: Construye la etapa $project para funciones de transformación.
-        Incluye conversión automática de string a Date para funciones de fecha.
+        ✅ ACTUALIZADO: Maneja proyección de múltiples agregaciones y COUNT DISTINCT.
         """
         select_fields = self.sql_parser.get_select_fields()
         
@@ -641,7 +684,7 @@ class SQLToMongoDBTranslator:
                 field = field_info["field"].upper().strip()
                 
                 # Funciones de transformación
-                transformation_funcs = ["CONCAT(", "LENGTH(", "UPPER(", "LOWER(", "SUBSTRING(", "YEAR(", "MONTH("]
+                transformation_funcs = ["CONCAT(", "LENGTH(", "UPPER(", "LOWER(", "SUBSTRING(", "YEAR(", "MONTH(", "DAY("]
                 if any(func in field for func in transformation_funcs):
                     has_transformation_functions = True
                 
@@ -660,74 +703,32 @@ class SQLToMongoDBTranslator:
                     field_upper = field.upper().strip()
                     alias = field_info.get("alias", field)
                     
-                    logger.info(f"Procesando campo: '{field}' con alias: '{alias}'")
+                    logger.info(f" Procesando campo de proyección: '{field}' con alias: '{alias}'")
                     
-                    # 🔧 FUNCIÓN YEAR - CORREGIDA con conversión de string a Date
-                    if "YEAR(" in field_upper:
-                        match = regex.search(r'YEAR\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                    # 🔧 COUNT(DISTINCT campo) - Proyección especial
+                    if "COUNT(DISTINCT " in field_upper:
+                        match = regex.search(r'COUNT\s*\(\s*DISTINCT\s+([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
-                            inner_field = match.group(1).strip()
-                            # Convertir string a Date y luego extraer el año
-                            project_stage["$project"][alias] = {
-                                "$year": {
-                                    "$dateFromString": {
-                                        "dateString": f"${inner_field}",
-                                        "onError": None  # Si falla la conversión, devolver null
-                                    }
-                                }
-                            }
-                            logger.info(f"YEAR({inner_field}) traducido a $year con conversión de string")
+                            distinct_field = match.group(1).strip()
+                            group_field_name = alias if alias != field else f"count_distinct_{distinct_field}"
+                            
+                            # Proyectar el tamaño del set creado en $group
+                            project_stage["$project"][alias] = {"$size": f"${group_field_name}_set"}
+                            logger.info(f" COUNT(DISTINCT) proyectado: {alias} = $size(${group_field_name}_set)")
                     
-                    # 🔧 FUNCIÓN MONTH - CORREGIDA con conversión de string a Date
-                    elif "MONTH(" in field_upper:
-                        match = regex.search(r'MONTH\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
-                        if match:
-                            inner_field = match.group(1).strip()
-                            project_stage["$project"][alias] = {
-                                "$month": {
-                                    "$dateFromString": {
-                                        "dateString": f"${inner_field}",
-                                        "onError": None
-                                    }
-                                }
-                            }
-                            logger.info(f"MONTH({inner_field}) traducido a $month con conversión de string")
+                    # 🔧 COUNT(*) y otras agregaciones simples
+                    elif field_upper == "COUNT(*)":
+                        group_field_name = alias if alias != field else "count_all"
+                        project_stage["$project"][alias] = f"${group_field_name}"
+                        logger.info(f" COUNT(*) proyectado: {alias} = ${group_field_name}")
                     
-                    # 🔧 FUNCIÓN DAY - CORREGIDA con conversión de string a Date
-                    elif "DAY(" in field_upper:
-                        match = regex.search(r'DAY\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
-                        if match:
-                            inner_field = match.group(1).strip()
-                            project_stage["$project"][alias] = {
-                                "$dayOfMonth": {
-                                    "$dateFromString": {
-                                        "dateString": f"${inner_field}",
-                                        "onError": None
-                                    }
-                                }
-                            }
-                            logger.info(f"DAY({inner_field}) traducido a $dayOfMonth con conversión de string")
+                    elif any(func in field_upper for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
+                        # Usar el alias como nombre del campo en $group
+                        group_field_name = alias if alias != field else alias
+                        project_stage["$project"][alias] = f"${group_field_name}"
+                        logger.info(f" Función de agregación proyectada: {alias} = ${group_field_name}")
                     
-                    # 🔧 FUNCIÓN CONCAT
-                    elif "CONCAT(" in field_upper:
-                        concat_expression = self._translate_concat_function(field)
-                        if concat_expression:
-                            project_stage["$project"][alias] = concat_expression
-                            logger.info(f"CONCAT traducido: {alias} = {concat_expression}")
-                        else:
-                            # Fallback si la traducción falla
-                            project_stage["$project"][alias] = f"${field}"
-                            logger.warning(f" CONCAT fallback para: {field}")
-                    
-                    # 🔧 FUNCIÓN LENGTH
-                    elif "LENGTH(" in field_upper:
-                        match = regex.search(r'LENGTH\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
-                        if match:
-                            inner_field = match.group(1).strip()
-                            project_stage["$project"][alias] = {"$strLenCP": f"${inner_field}"}
-                            logger.info(f"LENGTH({inner_field}) traducido a $strLenCP")
-                    
-                    # 🔧 FUNCIÓN UPPER
+                    # 🔧 FUNCIONES DE TRANSFORMACIÓN (sin cambios del código anterior)
                     elif "UPPER(" in field_upper:
                         match = regex.search(r'UPPER\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
@@ -735,34 +736,44 @@ class SQLToMongoDBTranslator:
                             project_stage["$project"][alias] = {"$toUpper": f"${inner_field}"}
                             logger.info(f" UPPER({inner_field}) traducido a $toUpper")
                     
-                    # 🔧 FUNCIÓN LOWER
                     elif "LOWER(" in field_upper:
                         match = regex.search(r'LOWER\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
                         if match:
                             inner_field = match.group(1).strip()
                             project_stage["$project"][alias] = {"$toLower": f"${inner_field}"}
-                            logger.info(f"LOWER({inner_field}) traducido a $toLower")
+                            logger.info(f" LOWER({inner_field}) traducido a $toLower")
                     
-                    # 🔧 FUNCIONES DE AGREGACIÓN (para cuando vienen de $group)
-                    elif any(func in field_upper for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
-                        # Para funciones de agregación, solo proyectar el alias desde $group
-                        project_stage["$project"][alias] = 1
-                        logger.info(f"Proyectando función de agregación: {alias}")
+                    elif "LENGTH(" in field_upper:
+                        match = regex.search(r'LENGTH\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            project_stage["$project"][alias] = {"$strLenCP": f"${inner_field}"}
+                            logger.info(f" LENGTH({inner_field}) traducido a $strLenCP")
+                    
+                    elif "CONCAT(" in field_upper:
+                        concat_expression = self._translate_concat_function(field)
+                        if concat_expression:
+                            project_stage["$project"][alias] = concat_expression
+                            logger.info(f" CONCAT traducido: {alias} = {concat_expression}")
+                        else:
+                            project_stage["$project"][alias] = f"${field}"
+                            logger.warning(f" CONCAT fallback para: {field}")
                     
                     else:
                         # Campo normal sin función
                         project_stage["$project"][alias] = f"${field}"
                         logger.info(f"Campo normal: {field}")
             
-            logger.info(f"Etapa $project generada: {project_stage}")
+            logger.info(f" Etapa $project generada: {project_stage}")
             return project_stage
         
         return None
 
+
     def _translate_concat_function(self, field):
         """
-        CORREGIDO: Traduce la función CONCAT a sintaxis MongoDB.
-        Maneja correctamente literales y funciones anidadas.
+        ✅ CORREGIDO: Traduce la función CONCAT a sintaxis MongoDB.
+        Maneja correctamente literales, campos y funciones anidadas.
         
         Args:
             field (str): Campo con función CONCAT, ej: "CONCAT(nombre, ' ', apellido)"
@@ -798,7 +809,7 @@ class SQLToMongoDBTranslator:
                 if (arg.startswith("'") and arg.endswith("'")) or (arg.startswith('"') and arg.endswith('"')):
                     literal = arg[1:-1]  # Quitar comillas externas
                     mongo_args.append(literal)  # Agregar SOLO el literal, SIN $
-                    logger.info(f"  Literal detectado: '{literal}'")
+                    logger.info(f"   Literal: '{literal}'")
                 
                 # NUEVO: Detectar funciones anidadas como UPPER()
                 elif "UPPER(" in arg.upper():
@@ -807,34 +818,32 @@ class SQLToMongoDBTranslator:
                     if upper_match:
                         inner_field = upper_match.group(1).strip()
                         mongo_args.append({"$toUpper": f"${inner_field}"})
-                        logger.info(f"  Función UPPER anidada: UPPER({inner_field})")
+                        logger.info(f"   UPPER anidado: UPPER({inner_field})")
                     else:
-                        # Fallback si no se puede parsear
                         mongo_args.append(f"${arg}")
-                        logger.warning(f"  UPPER fallback: ${arg}")
+                        logger.warning(f"   UPPER fallback: ${arg}")
                 
-                # NUEVO: Detectar otras funciones anidadas
                 elif "LOWER(" in arg.upper():
                     lower_match = regex.search(r'LOWER\s*\(\s*([^)]+)\s*\)', arg, regex.IGNORECASE)
                     if lower_match:
                         inner_field = lower_match.group(1).strip()
                         mongo_args.append({"$toLower": f"${inner_field}"})
-                        logger.info(f"  Función LOWER anidada: LOWER({inner_field})")
+                        logger.info(f"   LOWER anidado: LOWER({inner_field})")
                     else:
                         mongo_args.append(f"${arg}")
-                        logger.warning(f"  LOWER fallback: ${arg}")
+                        logger.warning(f"   LOWER fallback: ${arg}")
                 
                 else:
                     # Es un campo de la base de datos normal
                     mongo_args.append(f"${arg}")
-                    logger.info(f"  Campo: ${arg}")
+                    logger.info(f"   Campo: ${arg}")
             
             result = {"$concat": mongo_args}
-            logger.info(f"CONCAT traducido exitosamente: {result}")
+            logger.info(f" CONCAT traducido exitosamente: {result}")
             return result
             
         except Exception as e:
-            logger.error(f"Error traduciendo CONCAT: {e}")
+            logger.error(f" Error traduciendo CONCAT: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
@@ -842,7 +851,7 @@ class SQLToMongoDBTranslator:
 
     def _parse_concat_arguments(self, args_str):
         """
-        MEJORADO: Parsea argumentos de CONCAT respetando comillas y paréntesis anidados.
+        ✅ MEJORADO: Parsea argumentos de CONCAT respetando comillas y paréntesis anidados.
         
         Args:
             args_str (str): String con argumentos separados por comas
@@ -880,9 +889,8 @@ class SQLToMongoDBTranslator:
             else:
                 current_arg += char
         
-        logger.info(f"Argumentos finales parseados: {args}")
+        logger.info(f" Argumentos finales parseados: {args}")
         return args
-
 
 
     def _build_project_stage_for_joins(self, joins):
