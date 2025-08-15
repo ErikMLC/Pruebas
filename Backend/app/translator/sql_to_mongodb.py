@@ -138,7 +138,7 @@ class SQLToMongoDBTranslator:
     def _translate_select_find(self):
         """
         Traduce una consulta SELECT simple a una operación find() de MongoDB.
-        🔧 CORREGIDO: Detecta COUNT(*), funciones de agregación y funciones de transformación
+        🔧 CORREGIDO: Detecta funciones de transformación y redirige a aggregate
         """
         result = {
             "operation": "find",
@@ -158,33 +158,28 @@ class SQLToMongoDBTranslator:
         # Obtener campos a seleccionar
         select_fields = self.sql_parser.get_select_fields()
         
-        # 🔧 CRÍTICO: Verificar funciones ANTES de procesar campos
+        # 🔧 CRÍTICO: Verificar TODAS las funciones ANTES de procesar campos
         if isinstance(select_fields, list):
             for field_info in select_fields:
                 if isinstance(field_info, dict) and "field" in field_info:
                     field = field_info["field"]
                     field_upper = field.upper().strip()
                     
-                    # 🆕 DETECTAR COUNT(*) específicamente
-                    if field_upper == "COUNT(*)":
-                        logger.info("COUNT(*) detectado - redirigiendo a aggregate")
-                        return self._translate_select_aggregate()
+                    # 🆕 DETECTAR cualquier función SQL
+                    sql_functions = [
+                        "COUNT(", "SUM(", "AVG(", "MIN(", "MAX(",  # Agregación
+                        "LENGTH(", "UPPER(", "LOWER(", "CONCAT(",  # Transformación
+                        "YEAR(", "MONTH(", "DAY(",                 # Fecha
+                        "SUBSTRING(", "SUBSTR(", "TRIM("           # String
+                    ]
                     
-                    # 🆕 DETECTAR funciones de AGREGACIÓN (requieren $group)
-                    aggregate_functions = ["SUM(", "AVG(", "MIN(", "MAX(", "COUNT(", "GROUP_CONCAT("]
-                    if any(func in field_upper for func in aggregate_functions):
-                        logger.info(f"Función de agregación detectada en '{field}' - redirigiendo a aggregate")
+                    if any(func in field_upper for func in sql_functions):
+                        logger.info(f" Función SQL detectada en '{field}' - redirigiendo a aggregate")
                         return self._translate_select_aggregate()
-                    
-                    # 🆕 DETECTAR funciones de TRANSFORMACIÓN (requieren $project)
-                    transformation_functions = ["UPPER(", "LOWER(", "LENGTH(", "CONCAT(", "SUBSTRING(", "YEAR(", "MONTH("]
-                    if any(func in field_upper for func in transformation_functions):
-                        logger.info(f"Función de transformación detectada en '{field}' - usando aggregate con $project")
-                        return self._translate_select_with_transformations()
         
-        # Continuar con find normal solo si NO hay funciones
+        # Si llegamos aquí, es una consulta simple sin funciones
+        # Continuar con el procesamiento normal de find()
         if isinstance(select_fields, list):
-            # Verificar si hay un campo con valor "*"
             if not any(isinstance(field, dict) and field.get("field") == "*" for field in select_fields):
                 projection = {}
                 
@@ -192,55 +187,25 @@ class SQLToMongoDBTranslator:
                     if isinstance(field_info, dict) and "field" in field_info:
                         field = field_info["field"]
                         alias = field_info.get("alias", field)
-                        
-                        # Campo simple
                         projection[alias] = 1
                 
                 if projection:
                     result["projection"] = projection
         
-        # ✅ CORREGIDO: Obtener ORDER BY
+        # ORDER BY, LIMIT, etc. (mantener código existente)
         order_by = self.sql_parser.get_order_by()
         if order_by:
-            logger.info(f"ORDER BY detectado: {order_by}")
-            
-            if isinstance(order_by, dict):
-                result["sort"] = order_by
-                logger.info(f"ORDER BY aplicado como dict: {order_by}")
-            elif isinstance(order_by, list):
-                sort_dict = {}
-                for order_info in order_by:
-                    if isinstance(order_info, dict):
-                        field = order_info.get("field")
-                        direction = order_info.get("order", "ASC")
-                        if field:
-                            sort_dict[field] = -1 if direction.upper() == "DESC" else 1
-                    elif isinstance(order_info, str):
-                        sort_dict[order_info] = 1
-                
-                if sort_dict:
-                    result["sort"] = sort_dict
-                    logger.info(f"ORDER BY aplicado como dict convertido: {sort_dict}")
-            else:
-                logger.warning(f"Tipo inesperado para ORDER BY: {type(order_by)}, valor: {order_by}")
-                try:
-                    result["sort"] = order_by
-                except Exception as e:
-                    logger.error(f"Error procesando ORDER BY: {e}")
+            result["sort"] = order_by
         
-        # Obtener LIMIT
         limit = self.sql_parser.get_limit()
         if limit is not None:
-            logger.debug(f"Traduciendo LIMIT {limit} a MongoDB")
             result["limit"] = limit
         
-        # Agregar advertencias si las hay
         if self.warnings:
             result["warnings"] = self.warnings
                 
         logger.debug(f"Consulta MongoDB generada: {result}")
         return result
-
 
 
     def _translate_select_aggregate(self):
@@ -597,42 +562,223 @@ class SQLToMongoDBTranslator:
         return group_stage
 
 
+
     def _build_project_stage(self):
         """
-        ✅ CORREGIDO: Construye la etapa $project para agregaciones.
+        ✅ CORREGIDO: Construye la etapa $project para funciones de transformación.
         """
         select_fields = self.sql_parser.get_select_fields()
         
         if not select_fields:
             return None
         
-        # Verificar si hay funciones de agregación
-        has_aggregation = False
+        # Verificar si hay funciones de transformación o agregación
+        has_transformation_functions = False
+        has_aggregation_functions = False
         
         for field_info in select_fields:
             if isinstance(field_info, dict) and "field" in field_info:
                 field = field_info["field"].upper().strip()
                 
-                if field == "COUNT(*)" or any(func in field for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
-                    has_aggregation = True
-                    break
+                # Funciones de transformación
+                transformation_funcs = ["CONCAT(", "LENGTH(", "UPPER(", "LOWER(", "SUBSTRING(", "YEAR(", "MONTH("]
+                if any(func in field for func in transformation_funcs):
+                    has_transformation_functions = True
+                
+                # Funciones de agregación
+                aggregation_funcs = ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]
+                if any(func in field for func in aggregation_funcs):
+                    has_aggregation_functions = True
         
-        if has_aggregation:
-            project_stage = {"$project": {"_id": 0}}  # Ocultar _id
+        # Solo crear $project si hay funciones de transformación O si hay agregaciones
+        if has_transformation_functions or has_aggregation_functions:
+            project_stage = {"$project": {"_id": 0}}  # Ocultar _id por defecto
             
             for field_info in select_fields:
                 if isinstance(field_info, dict) and "field" in field_info:
                     field = field_info["field"]
-                    alias = field_info.get("alias", "count_all")
+                    field_upper = field.upper().strip()
+                    alias = field_info.get("alias", field)
                     
-                    # Para funciones de agregación, proyectar el alias
-                    if field.upper().strip() == "COUNT(*)" or any(func in field.upper() for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
+                    logger.info(f"Procesando campo: '{field}' con alias: '{alias}'")
+                    
+                    # 🔧 FUNCIÓN CONCAT
+                    if "CONCAT(" in field_upper:
+                        concat_expression = self._translate_concat_function(field)
+                        if concat_expression:
+                            project_stage["$project"][alias] = concat_expression
+                            logger.info(f"CONCAT traducido: {alias} = {concat_expression}")
+                        else:
+                            # Fallback si la traducción falla
+                            project_stage["$project"][alias] = f"${field}"
+                            logger.warning(f" CONCAT fallback para: {field}")
+                    
+                    # 🔧 FUNCIÓN LENGTH
+                    elif "LENGTH(" in field_upper:
+                        match = regex.search(r'LENGTH\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            project_stage["$project"][alias] = {"$strLenCP": f"${inner_field}"}
+                            logger.info(f"LENGTH({inner_field}) traducido a $strLenCP")
+                    
+                    # 🔧 FUNCIÓN UPPER
+                    elif "UPPER(" in field_upper:
+                        match = regex.search(r'UPPER\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            project_stage["$project"][alias] = {"$toUpper": f"${inner_field}"}
+                            logger.info(f" UPPER({inner_field}) traducido a $toUpper")
+                    
+                    # 🔧 FUNCIÓN LOWER
+                    elif "LOWER(" in field_upper:
+                        match = regex.search(r'LOWER\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            project_stage["$project"][alias] = {"$toLower": f"${inner_field}"}
+                            logger.info(f"LOWER({inner_field}) traducido a $toLower")
+                    
+                    # 🔧 FUNCIONES DE AGREGACIÓN (para cuando vienen de $group)
+                    elif any(func in field_upper for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
+                        # Para funciones de agregación, solo proyectar el alias desde $group
                         project_stage["$project"][alias] = 1
-                        logger.info(f" Proyectando agregación: {alias}")
+                        logger.info(f"Proyectando función de agregación: {alias}")
+                    
+                    else:
+                        # Campo normal sin función
+                        project_stage["$project"][alias] = f"${field}"
+                        logger.info(f"Campo normal: {field}")
             
+            logger.info(f"Etapa $project generada: {project_stage}")
             return project_stage
         
         return None
+
+
+    def _translate_concat_function(self, field):
+        """
+        CORREGIDO: Traduce la función CONCAT a sintaxis MongoDB.
+        Maneja correctamente literales y funciones anidadas.
+        
+        Args:
+            field (str): Campo con función CONCAT, ej: "CONCAT(nombre, ' ', apellido)"
+            
+        Returns:
+            dict: Expresión MongoDB para $concat
+        """
+        try:
+            # Extraer contenido entre paréntesis de CONCAT
+            match = regex.search(r'CONCAT\s*\(\s*(.*)\s*\)', field, regex.IGNORECASE)
+            if not match:
+                logger.error(f"No se pudo extraer contenido de CONCAT: {field}")
+                return None
+            
+            # Obtener argumentos de CONCAT
+            args_str = match.group(1).strip()
+            logger.info(f"Argumentos de CONCAT extraídos: '{args_str}'")
+            
+            # Dividir argumentos respetando comillas
+            args = self._parse_concat_arguments(args_str)
+            logger.info(f"Argumentos parseados: {args}")
+            
+            if not args:
+                logger.error("No se pudieron parsear argumentos de CONCAT")
+                return None
+            
+            # Convertir argumentos a formato MongoDB
+            mongo_args = []
+            for arg in args:
+                arg = arg.strip()
+                
+                # CRÍTICO: Detectar literales entre comillas
+                if (arg.startswith("'") and arg.endswith("'")) or (arg.startswith('"') and arg.endswith('"')):
+                    literal = arg[1:-1]  # Quitar comillas externas
+                    mongo_args.append(literal)  # Agregar SOLO el literal, SIN $
+                    logger.info(f"  Literal detectado: '{literal}'")
+                
+                # NUEVO: Detectar funciones anidadas como UPPER()
+                elif "UPPER(" in arg.upper():
+                    # UPPER(campo) dentro de CONCAT
+                    upper_match = regex.search(r'UPPER\s*\(\s*([^)]+)\s*\)', arg, regex.IGNORECASE)
+                    if upper_match:
+                        inner_field = upper_match.group(1).strip()
+                        mongo_args.append({"$toUpper": f"${inner_field}"})
+                        logger.info(f"  Función UPPER anidada: UPPER({inner_field})")
+                    else:
+                        # Fallback si no se puede parsear
+                        mongo_args.append(f"${arg}")
+                        logger.warning(f"  UPPER fallback: ${arg}")
+                
+                # NUEVO: Detectar otras funciones anidadas
+                elif "LOWER(" in arg.upper():
+                    lower_match = regex.search(r'LOWER\s*\(\s*([^)]+)\s*\)', arg, regex.IGNORECASE)
+                    if lower_match:
+                        inner_field = lower_match.group(1).strip()
+                        mongo_args.append({"$toLower": f"${inner_field}"})
+                        logger.info(f"  Función LOWER anidada: LOWER({inner_field})")
+                    else:
+                        mongo_args.append(f"${arg}")
+                        logger.warning(f"  LOWER fallback: ${arg}")
+                
+                else:
+                    # Es un campo de la base de datos normal
+                    mongo_args.append(f"${arg}")
+                    logger.info(f"  Campo: ${arg}")
+            
+            result = {"$concat": mongo_args}
+            logger.info(f"CONCAT traducido exitosamente: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error traduciendo CONCAT: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+
+    def _parse_concat_arguments(self, args_str):
+        """
+        MEJORADO: Parsea argumentos de CONCAT respetando comillas y paréntesis anidados.
+        
+        Args:
+            args_str (str): String con argumentos separados por comas
+            
+        Returns:
+            list: Lista de argumentos parseados
+        """
+        args = []
+        current_arg = ""
+        in_quotes = False
+        quote_char = None
+        paren_level = 0
+        
+        for char in args_str + ',':  # Añadir coma al final para capturar último argumento
+            if char in ["'", '"'] and (not in_quotes or char == quote_char):
+                # Manejo de comillas
+                in_quotes = not in_quotes
+                if in_quotes:
+                    quote_char = char
+                else:
+                    quote_char = None
+                current_arg += char
+            elif char == '(' and not in_quotes:
+                # Paréntesis de funciones anidadas
+                paren_level += 1
+                current_arg += char
+            elif char == ')' and not in_quotes:
+                paren_level -= 1
+                current_arg += char
+            elif char == ',' and not in_quotes and paren_level == 0:
+                # Separador de argumentos (solo a nivel superior)
+                if current_arg.strip():
+                    args.append(current_arg.strip())
+                current_arg = ""
+            else:
+                current_arg += char
+        
+        logger.info(f"Argumentos finales parseados: {args}")
+        return args
+
+
 
     def _build_project_stage_for_joins(self, joins):
         """
