@@ -8,6 +8,7 @@ class WhereParser:
     """
     Parser especializado para cláusulas WHERE de SQL.
     Analiza condiciones WHERE y las convierte a formato MongoDB.
+    🔧 CORREGIDO: Manejo mejorado de BETWEEN
     """
     
     def parse(self, query):
@@ -61,16 +62,19 @@ class WhereParser:
 
     def _parse_conditions(self, conditions_str, result):
         """
-        Analiza las condiciones de una cláusula WHERE.
-        
-        Args:
-            conditions_str (str): String con las condiciones
-            result (dict): Diccionario donde se almacenarán las condiciones
+        🔧 CORREGIDO: Detectar BETWEEN antes de dividir por AND/OR
         """
         # Normalizar la condición
         conditions_str = conditions_str.strip()
         
-        # Verificar si hay operadores lógicos a nivel superior
+        # 🔧 CRÍTICO: Verificar si es una condición BETWEEN completa PRIMERO
+        between_pattern = r'\w+\s+BETWEEN\s+.+?\s+AND\s+.+?(?:\s*;|\s*$)'
+        if re.search(between_pattern, conditions_str, re.IGNORECASE):
+            logger.debug("🔍 Condición BETWEEN detectada, procesando como condición simple")
+            self._parse_simple_condition(conditions_str, result)
+            return
+        
+        # Solo si NO es BETWEEN, proceder con la lógica de AND/OR
         if self._has_top_level_operator(conditions_str, "OR"):
             # Manejar condiciones OR
             parts = self._split_by_top_level_operator(conditions_str, "OR")
@@ -101,10 +105,10 @@ class WhereParser:
         self._parse_simple_condition(conditions_str, result)
 
 
-    
+
     def _parse_simple_condition(self, condition_str, result):
         """
-        🔧 MÉTODO CORREGIDO: Analiza una condición simple con limpieza de punto y coma
+        🔧 MÉTODO CORREGIDO: Análisis mejorado de condiciones simples con BETWEEN
         
         Args:
             condition_str (str): String con la condición simple
@@ -117,6 +121,36 @@ class WhereParser:
         if condition_str.endswith(';'):
             condition_str = condition_str[:-1].strip()
         
+        # 🔧 CRÍTICO: Manejo mejorado de BETWEEN
+        # Patrón más robusto que captura correctamente los valores
+        between_pattern = r'(\w+)\s+BETWEEN\s+([^A]+?)\s+AND\s+(.+?)(?:\s*;|\s*$)'
+        between_match = re.search(between_pattern, condition_str, re.IGNORECASE)
+        
+        if between_match:
+            field = between_match.group(1).strip()
+            min_val_str = between_match.group(2).strip()
+            max_val_str = between_match.group(3).strip()
+            
+            logger.debug(f"🔍 BETWEEN detectado - Campo: '{field}', Min: '{min_val_str}', Max: '{max_val_str}'")
+            
+            # 🔧 LIMPIAR Y PARSEAR VALORES
+            min_val = self._parse_value(self._clean_value(min_val_str))
+            max_val = self._parse_value(self._clean_value(max_val_str))
+            
+            # 🔧 VALIDACIÓN: Asegurar que los valores son numéricos para BETWEEN
+            try:
+                # Intentar convertir a números si no lo son ya
+                if isinstance(min_val, str) and min_val.replace('.', '').replace('-', '').isdigit():
+                    min_val = float(min_val) if '.' in min_val else int(min_val)
+                if isinstance(max_val, str) and max_val.replace('.', '').replace('-', '').isdigit():
+                    max_val = float(max_val) if '.' in max_val else int(max_val)
+            except (ValueError, TypeError):
+                logger.warning(f"⚠️ Valores BETWEEN no numéricos: min={min_val}, max={max_val}")
+            
+            result[field] = {"$gte": min_val, "$lte": max_val}
+            logger.debug(f"✅ BETWEEN parseado: {field} BETWEEN {min_val} AND {max_val}")
+            return
+        
         # Operadores de comparación estándar
         operators = {
             ">=": "$gte",
@@ -127,23 +161,6 @@ class WhereParser:
             ">": "$gt",
             "<": "$lt"
         }
-        
-        # Manejar operadores especiales PRIMERO
-        
-        # BETWEEN
-        between_match = re.search(r'([\w.]+)\s+BETWEEN\s+(.*?)\s+AND\s+(.*?)(?:\s*;|\s*$)', condition_str, re.IGNORECASE)
-        if between_match:
-            field = between_match.group(1).strip()
-            min_val_str = between_match.group(2).strip()
-            max_val_str = between_match.group(3).strip()
-            
-            # 🔧 LIMPIAR VALORES
-            min_val = self._parse_value(self._clean_value(min_val_str))
-            max_val = self._parse_value(self._clean_value(max_val_str))
-            
-            result[field] = {"$gte": min_val, "$lte": max_val}
-            logger.debug(f"BETWEEN parseado: {field} BETWEEN {min_val} AND {max_val}")
-            return
         
         # IN
         in_match = re.search(r'([\w.]+)\s+IN\s+\((.*?)\)', condition_str, re.IGNORECASE)
@@ -194,9 +211,18 @@ class WhereParser:
             else:
                 pattern = pattern_str
             
-            # Convertir patrón SQL a regex MongoDB
+            # 🔧 CORREGIDO: Convertir patrón SQL a regex MongoDB más preciso
             mongo_pattern = pattern.replace("%", ".*").replace("_", ".")
-            result[field] = {"$regex": mongo_pattern, "$options": "i"}
+            
+            # 🔧 CRÍTICO: Hacer que 'M%' sea case-sensitive para match exacto
+            if pattern.endswith('%') and not pattern.startswith('%'):
+                # Patrón como 'M%' - debe empezar con M exactamente
+                mongo_pattern = "^" + mongo_pattern  # Añadir ^ para inicio de string
+                result[field] = {"$regex": mongo_pattern}  # SIN $options: 'i' para case-sensitive
+            else:
+                # Otros patrones LIKE mantienen case-insensitive
+                result[field] = {"$regex": mongo_pattern, "$options": "i"}
+            
             logger.debug(f"LIKE parseado: {field} LIKE '{pattern}' -> regex: {mongo_pattern}")
             return
         
@@ -241,31 +267,33 @@ class WhereParser:
 
     def _clean_value(self, value_str):
         """
-        🆕 NUEVO: Método auxiliar para limpiar valores individuales
+        🆕 MÉTODO MEJORADO: Limpieza robusta de valores
         
         Args:
             value_str (str): Valor a limpiar
             
         Returns:
-            str: Valor limpio sin punto y coma
+            str: Valor limpio sin punto y coma ni espacios extra
         """
         if not value_str:
             return value_str
         
-        # Remover espacios
+        # Remover espacios al inicio y final
         cleaned = value_str.strip()
         
         # 🔧 CRÍTICO: Remover punto y coma final solo si NO está entre comillas
         if cleaned.endswith(';'):
             # Verificar que no esté entre comillas
-            if not ((cleaned.startswith("'") and cleaned.count("'") >= 2) or
-                    (cleaned.startswith('"') and cleaned.count('"') >= 2)):
+            quote_count_single = cleaned.count("'")
+            quote_count_double = cleaned.count('"')
+            
+            # Si no hay comillas o están balanceadas, es seguro remover el punto y coma
+            if (quote_count_single == 0 or quote_count_single % 2 == 0) and \
+               (quote_count_double == 0 or quote_count_double % 2 == 0):
                 cleaned = cleaned[:-1].strip()
         
-        logger.debug(f"Valor limpio: '{value_str}' -> '{cleaned}'")
-        return cleaned 
-
-
+        logger.debug(f"🧹 Valor limpio: '{value_str}' -> '{cleaned}'")
+        return cleaned
 
     def _has_top_level_operator(self, text, operator):
         """
@@ -360,6 +388,10 @@ class WhereParser:
         for char in values_str + ',':  # Añadir coma al final para capturar el último valor
             if char in ["'", '"'] and (not in_quotes or char == quote_char):
                 in_quotes = not in_quotes
+                if in_quotes:
+                    quote_char = char
+                else:
+                    quote_char = None
                 current += char
             elif char == ',' and not in_quotes:
                 values.append(current.strip())
@@ -371,7 +403,7 @@ class WhereParser:
     
     def _parse_value(self, value_str):
         """
-        Parsea un valor desde un string a su tipo adecuado (int, float, bool, None, str).
+        🔧 MÉTODO MEJORADO: Parsea un valor con mejor manejo de tipos
         
         Args:
             value_str (str): Valor a convertir
@@ -400,18 +432,38 @@ class WhereParser:
         if value_str.upper() == "FALSE":
             return False
         
-        # Si tiene punto decimal, intentar convertir a float
-        if "." in value_str:
+        # 🔧 MEJORADO: Manejo más robusto de números
+        # Verificar si es un número decimal
+        if re.match(r'^-?\d+\.\d+$', value_str):
             try:
                 return float(value_str)
             except ValueError:
                 pass
         
-        # Intentar convertir a entero
-        try:
-            return int(value_str)
-        except ValueError:
-            pass
+        # Verificar si es un número entero
+        if re.match(r'^-?\d+$', value_str):
+            try:
+                return int(value_str)
+            except ValueError:
+                pass
         
         # Si no coincide con ningún tipo, devolver como string
         return value_str
+    
+    def test_between_parsing(self, condition_str):
+        """
+        🆕 MÉTODO DE PRUEBA: Para depurar problemas con BETWEEN
+        
+        Args:
+            condition_str (str): Condición BETWEEN a probar
+            
+        Returns:
+            dict: Resultado del parsing
+        """
+        logger.info(f"🧪 Probando BETWEEN: '{condition_str}'")
+        
+        result = {}
+        self._parse_simple_condition(condition_str, result)
+        
+        logger.info(f"🧪 Resultado: {result}")
+        return result

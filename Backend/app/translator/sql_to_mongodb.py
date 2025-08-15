@@ -110,7 +110,7 @@ class SQLToMongoDBTranslator:
             group_by = self.sql_parser.get_group_by()
             has_group_by = len(group_by) > 0 if group_by else False
         
-        logger.info(f"📊 Características detectadas - Agregaciones: {has_aggregate}, GROUP BY: {has_group_by}, ORDER BY: {has_order_by}")
+        logger.info(f"Características detectadas - Agregaciones: {has_aggregate}, GROUP BY: {has_group_by}, ORDER BY: {has_order_by}")
         
         # ✅ CORREGIDA: Lógica de decisión para determinar el tipo de operación
         if has_union:

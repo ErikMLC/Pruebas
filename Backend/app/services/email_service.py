@@ -1,5 +1,3 @@
-# Backend/app/services/email_service.py - VERSIÓN SHAREPOINT SIN EMOJIS
-
 import os
 import json
 import logging
