@@ -62,10 +62,13 @@ class WhereParser:
 
     def _parse_conditions(self, conditions_str, result):
         """
-        🔧 CORREGIDO: Detectar BETWEEN antes de dividir por AND/OR
+        🔧 MÉTODO CORREGIDO: Manejo mejorado de paréntesis y operadores anidados
         """
         # Normalizar la condición
         conditions_str = conditions_str.strip()
+        
+        # 🆕 PASO 1: Limpiar paréntesis externos si envuelven toda la expresión
+        conditions_str = self._remove_outer_parentheses(conditions_str)
         
         # 🔧 CRÍTICO: Verificar si es una condición BETWEEN completa PRIMERO
         between_pattern = r'\w+\s+BETWEEN\s+.+?\s+AND\s+.+?(?:\s*;|\s*$)'
@@ -74,8 +77,9 @@ class WhereParser:
             self._parse_simple_condition(conditions_str, result)
             return
         
-        # Solo si NO es BETWEEN, proceder con la lógica de AND/OR
+        # 🔧 MEJORADO: Solo si NO es BETWEEN, proceder con la lógica de AND/OR
         if self._has_top_level_operator(conditions_str, "OR"):
+            logger.debug(f"🔄 Procesando condiciones OR: {conditions_str}")
             # Manejar condiciones OR
             parts = self._split_by_top_level_operator(conditions_str, "OR")
             or_conditions = []
@@ -91,6 +95,7 @@ class WhereParser:
             return
             
         if self._has_top_level_operator(conditions_str, "AND"):
+            logger.debug(f"🔄 Procesando condiciones AND: {conditions_str}")
             # Manejar condiciones AND
             parts = self._split_by_top_level_operator(conditions_str, "AND")
             
@@ -103,6 +108,31 @@ class WhereParser:
         
         # Si llegamos aquí, es una condición simple
         self._parse_simple_condition(conditions_str, result)
+
+
+    def _remove_outer_parentheses(self, text):
+        """
+        🆕 NUEVO: Remueve paréntesis externos que envuelven toda la expresión
+        """
+        text = text.strip()
+        
+        # Verificar si toda la expresión está envuelta en paréntesis
+        if text.startswith('(') and text.endswith(')'):
+            # Verificar que los paréntesis estén balanceados
+            paren_count = 0
+            for i, char in enumerate(text):
+                if char == '(':
+                    paren_count += 1
+                elif char == ')':
+                    paren_count -= 1
+                    # Si llegamos a 0 antes del final, los paréntesis externos no envuelven todo
+                    if paren_count == 0 and i < len(text) - 1:
+                        return text
+            
+            # Si llegamos aquí, los paréntesis externos sí envuelven toda la expresión
+            return text[1:-1].strip()
+        
+        return text
 
 
 
@@ -319,52 +349,51 @@ class WhereParser:
         
         return False
     
+
     def _split_by_top_level_operator(self, text, operator):
         """
-        Divide el texto por un operador específico a nivel superior.
-        
-        Args:
-            text (str): Texto a dividir
-            operator (str): Operador para dividir (AND/OR)
-            
-        Returns:
-            list: Lista de partes divididas
+        🔧 MÉTODO CORREGIDO: Divide texto por operador a nivel superior con mejor manejo de paréntesis
         """
         result = []
         current = ""
-        level = 0
+        paren_level = 0
         i = 0
         
-        op_pattern = r'\s' + operator + r'\s'
-        text = " " + text + " "  # Añadir espacios para facilitar la coincidencia
+        # Patrón del operador con espacios alrededor
+        op_pattern = rf'\s+{operator}\s+'
         
         while i < len(text):
-            if text[i] == '(':
-                level += 1
-                current += text[i]
-            elif text[i] == ')':
-                level -= 1
-                current += text[i]
-            elif level == 0 and i <= len(text) - len(operator) - 2:
-                # Verificar si esta parte coincide con el operador (con espacios)
-                part = text[i:i+len(operator)+2]
-                if re.match(op_pattern, part, re.IGNORECASE):
-                    # Encontramos el operador, guardamos la parte actual
+            char = text[i]
+            
+            # Contar paréntesis
+            if char == '(':
+                paren_level += 1
+            elif char == ')':
+                paren_level -= 1
+            
+            # Solo buscar operador si estamos a nivel 0 (fuera de paréntesis)
+            if paren_level == 0:
+                # Verificar si encontramos el operador en esta posición
+                remaining = text[i:]
+                match = re.match(op_pattern, remaining, re.IGNORECASE)
+                
+                if match:
+                    # Encontramos el operador a nivel superior
                     if current.strip():
                         result.append(current.strip())
                     current = ""
                     # Saltar el operador
-                    i += len(operator)
-                else:
-                    current += text[i]
-            else:
-                current += text[i]
+                    i += len(match.group(0))
+                    continue
+            
+            current += char
             i += 1
         
         # Añadir la última parte si no está vacía
         if current.strip():
             result.append(current.strip())
         
+        logger.debug(f"🔧 División por {operator}: {result}")
         return result
     
     def _split_values(self, values_str):

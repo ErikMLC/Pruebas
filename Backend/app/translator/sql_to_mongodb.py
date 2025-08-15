@@ -1,4 +1,5 @@
 import logging
+import re as regex
 from app.parser.sql_parser import SQLParser
 
 # Configurar logging
@@ -133,9 +134,11 @@ class SQLToMongoDBTranslator:
             logger.info("Consulta simple - usando operación find")
             return self._translate_select_find()
 
+
     def _translate_select_find(self):
         """
         Traduce una consulta SELECT simple a una operación find() de MongoDB.
+        🔧 CORREGIDO: Detecta COUNT(*), funciones de agregación y funciones de transformación
         """
         result = {
             "operation": "find",
@@ -155,7 +158,31 @@ class SQLToMongoDBTranslator:
         # Obtener campos a seleccionar
         select_fields = self.sql_parser.get_select_fields()
         
-        # Asegurarnos de que select_fields sea una lista
+        # 🔧 CRÍTICO: Verificar funciones ANTES de procesar campos
+        if isinstance(select_fields, list):
+            for field_info in select_fields:
+                if isinstance(field_info, dict) and "field" in field_info:
+                    field = field_info["field"]
+                    field_upper = field.upper().strip()
+                    
+                    # 🆕 DETECTAR COUNT(*) específicamente
+                    if field_upper == "COUNT(*)":
+                        logger.info("COUNT(*) detectado - redirigiendo a aggregate")
+                        return self._translate_select_aggregate()
+                    
+                    # 🆕 DETECTAR funciones de AGREGACIÓN (requieren $group)
+                    aggregate_functions = ["SUM(", "AVG(", "MIN(", "MAX(", "COUNT(", "GROUP_CONCAT("]
+                    if any(func in field_upper for func in aggregate_functions):
+                        logger.info(f"Función de agregación detectada en '{field}' - redirigiendo a aggregate")
+                        return self._translate_select_aggregate()
+                    
+                    # 🆕 DETECTAR funciones de TRANSFORMACIÓN (requieren $project)
+                    transformation_functions = ["UPPER(", "LOWER(", "LENGTH(", "CONCAT(", "SUBSTRING(", "YEAR(", "MONTH("]
+                    if any(func in field_upper for func in transformation_functions):
+                        logger.info(f"Función de transformación detectada en '{field}' - usando aggregate con $project")
+                        return self._translate_select_with_transformations()
+        
+        # Continuar con find normal solo si NO hay funciones
         if isinstance(select_fields, list):
             # Verificar si hay un campo con valor "*"
             if not any(isinstance(field, dict) and field.get("field") == "*" for field in select_fields):
@@ -166,14 +193,8 @@ class SQLToMongoDBTranslator:
                         field = field_info["field"]
                         alias = field_info.get("alias", field)
                         
-                        # Verificar si el campo contiene funciones
-                        if self._has_sql_functions_in_field(field):
-                            # Si hay funciones, esta consulta debe usar aggregate
-                            logger.info("Funciones detectadas en SELECT - redirigiendo a aggregate")
-                            return self._translate_select_aggregate()
-                        else:
-                            # Campo simple
-                            projection[alias] = 1
+                        # Campo simple
+                        projection[alias] = 1
                 
                 if projection:
                     result["projection"] = projection
@@ -181,16 +202,12 @@ class SQLToMongoDBTranslator:
         # ✅ CORREGIDO: Obtener ORDER BY
         order_by = self.sql_parser.get_order_by()
         if order_by:
-            logger.info(f"🔍 ORDER BY detectado: {order_by}")
+            logger.info(f"ORDER BY detectado: {order_by}")
             
-            # ✅ NUEVO: Verificar el tipo de datos que devuelve get_order_by()
             if isinstance(order_by, dict):
-                # Si es un diccionario directo como {'edad': -1}
                 result["sort"] = order_by
-                logger.info(f"📊 ORDER BY aplicado como dict: {order_by}")
-                
+                logger.info(f"ORDER BY aplicado como dict: {order_by}")
             elif isinstance(order_by, list):
-                # Si es una lista de objetos con estructura [{"field": "edad", "order": "DESC"}]
                 sort_dict = {}
                 for order_info in order_by:
                     if isinstance(order_info, dict):
@@ -199,21 +216,17 @@ class SQLToMongoDBTranslator:
                         if field:
                             sort_dict[field] = -1 if direction.upper() == "DESC" else 1
                     elif isinstance(order_info, str):
-                        # Si es un string simple, asumir ASC
                         sort_dict[order_info] = 1
                 
                 if sort_dict:
                     result["sort"] = sort_dict
-                    logger.info(f"📊 ORDER BY aplicado como dict convertido: {sort_dict}")
-            
+                    logger.info(f"ORDER BY aplicado como dict convertido: {sort_dict}")
             else:
-                # Fallback: intentar convertir a string y parsear
-                logger.warning(f"⚠️ Tipo inesperado para ORDER BY: {type(order_by)}, valor: {order_by}")
+                logger.warning(f"Tipo inesperado para ORDER BY: {type(order_by)}, valor: {order_by}")
                 try:
-                    # Intentar usar directamente si es string o similar
                     result["sort"] = order_by
                 except Exception as e:
-                    logger.error(f"❌ Error procesando ORDER BY: {e}")
+                    logger.error(f"Error procesando ORDER BY: {e}")
         
         # Obtener LIMIT
         limit = self.sql_parser.get_limit()
@@ -227,6 +240,7 @@ class SQLToMongoDBTranslator:
                 
         logger.debug(f"Consulta MongoDB generada: {result}")
         return result
+
 
 
     def _translate_select_aggregate(self):
@@ -276,7 +290,7 @@ class SQLToMongoDBTranslator:
         if hasattr(self.sql_parser, 'get_order_by'):
             order_by = self.sql_parser.get_order_by()
             if order_by:
-                logger.info(f"🔍 ORDER BY en aggregate detectado: {order_by}, tipo: {type(order_by)}")
+                logger.info(f" ORDER BY en aggregate detectado: {order_by}, tipo: {type(order_by)}")
                 
                 sort_stage = {"$sort": {}}
                 
@@ -284,7 +298,7 @@ class SQLToMongoDBTranslator:
                 if isinstance(order_by, dict):
                     # Si ya es un diccionario como {'edad': -1, 'nombre': 1}
                     sort_stage["$sort"] = order_by
-                    logger.info(f"📊 ORDER BY aplicado directamente: {order_by}")
+                    logger.info(f" ORDER BY aplicado directamente: {order_by}")
                     
                 elif isinstance(order_by, list):
                     # Si es una lista de objetos [{"field": "edad", "order": "DESC"}]
@@ -312,7 +326,7 @@ class SQLToMongoDBTranslator:
                 # Solo agregar si se configuró correctamente
                 if sort_stage and sort_stage["$sort"]:
                     pipeline.append(sort_stage)
-                    logger.info(f"✅ $sort agregado al pipeline: {sort_stage}")
+                    logger.info(f" $sort agregado al pipeline: {sort_stage}")
         
         # ✅ 7. CORREGIDO: Etapa $limit para LIMIT
         if hasattr(self.sql_parser, 'get_limit'):
@@ -321,7 +335,7 @@ class SQLToMongoDBTranslator:
                 pipeline.append({
                     "$limit": limit
                 })
-                logger.info(f"📏 $limit agregado: {limit}")
+                logger.info(f" $limit agregado: {limit}")
         
         result = {
             "operation": "aggregate",
@@ -333,7 +347,7 @@ class SQLToMongoDBTranslator:
         if self.warnings:
             result["warnings"] = self.warnings
         
-        logger.info(f"🏗️ Pipeline completo generado: {len(pipeline)} etapas")
+        logger.info(f" Pipeline completo generado: {len(pipeline)} etapas")
         return result
 
 
@@ -446,51 +460,139 @@ class SQLToMongoDBTranslator:
         """
         group_stage = None
         
-        # Verificar si hay funciones de agregación
-        functions = self.sql_parser.get_functions()
-        aggregate_functions = []
+        # Obtener campos SELECT para detectar funciones
+        select_fields = self.sql_parser.get_select_fields()
         
-        if functions:
-            aggregate_function_names = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'GROUP_CONCAT']
-            aggregate_functions = [f for f in functions if f.get('function_name', '').upper() in aggregate_function_names]
+        if not select_fields:
+            return None
         
-        if aggregate_functions:
+        # Buscar funciones de agregación en los campos SELECT
+        has_aggregation = False
+        
+        for field_info in select_fields:
+            if isinstance(field_info, dict) and "field" in field_info:
+                field = field_info["field"].upper().strip()
+                
+                # 🔧 DETECTAR COUNT(*) específicamente
+                if field == "COUNT(*)":
+                    has_aggregation = True
+                    break
+                
+                # Detectar otras funciones de agregación
+                agg_functions = ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]
+                if any(func in field for func in agg_functions):
+                    has_aggregation = True
+                    break
+        
+        if has_aggregation:
             # Crear etapa $group
             group_stage = {"$group": {"_id": None}}  # Sin agrupación, solo agregación
             
-            for func in aggregate_functions:
-                func_name = func.get('function_name', '').upper()
-                args = func.get('args', '')
-                alias = func.get('alias', f"{func_name.lower()}_result")
-                
-                logger.info(f"🔢 Procesando {func_name}({args}) -> {alias}")
-                
-                if func_name == 'COUNT':
-                    if args.strip() == '*':
-                        # COUNT(*) - contar todos los documentos
+            for field_info in select_fields:
+                if isinstance(field_info, dict) and "field" in field_info:
+                    field = field_info["field"]
+                    field_upper = field.upper().strip()
+                    alias = field_info.get("alias", "count_all")
+                    
+                    logger.info(f" Procesando campo: {field}")
+                    
+                    # 🔧 MANEJAR COUNT(*) específicamente
+                    if field_upper == "COUNT(*)":
                         group_stage["$group"][alias] = {"$sum": 1}
-                        logger.info(f"✅ COUNT(*) configurado como $sum: 1")
-                    else:
-                        # COUNT(campo) - contar valores no nulos
-                        field_name = args.strip()
-                        group_stage["$group"][alias] = {
-                            "$sum": {"$cond": [{"$ne": [f"${field_name}", None]}, 1, 0]}
-                        }
-                        logger.info(f"✅ COUNT({field_name}) configurado")
-                
-                elif func_name == 'SUM':
-                    field_name = args.strip()
-                    group_stage["$group"][alias] = {"$sum": f"${field_name}"}
+                        logger.info(f" COUNT(*) configurado como $sum: 1 con alias '{alias}'")
                     
-                elif func_name == 'AVG':
-                    field_name = args.strip()
-                    group_stage["$group"][alias] = {"$avg": f"${field_name}"}
+                    # Manejar otras funciones de agregación
+                    elif "COUNT(" in field_upper:
+                        # COUNT(campo) - extraer campo entre paréntesis
+                        import re
+                        match = regex.search(r'COUNT\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            if inner_field != "*":
+                                group_stage["$group"][alias] = {
+                                    "$sum": {"$cond": [{"$ne": [f"${inner_field}", None]}, 1, 0]}
+                                }
+                            else:
+                                group_stage["$group"][alias] = {"$sum": 1}
+                        logger.info(f"✅ COUNT({inner_field if 'inner_field' in locals() else '*'}) configurado")
                     
-                elif func_name in ['MIN', 'MAX']:
-                    field_name = args.strip()
-                    group_stage["$group"][alias] = {f"${func_name.lower()}": f"${field_name}"}
+                    # Otras funciones (SUM, AVG, etc.)
+
+                    elif "SUM(" in field_upper:
+                        # SUM(campo) o SUM(campo1 * campo2) - extraer expresión entre paréntesis
+                        match = regex.search(r'SUM\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_expression = match.group(1).strip()
+                            
+                            # 🔧 NUEVO: Detectar multiplicación
+                            if '*' in inner_expression:
+                                # SUM(campo1 * campo2)
+                                parts = [p.strip() for p in inner_expression.split('*')]
+                                if len(parts) == 2:
+                                    field1 = parts[0]
+                                    field2 = parts[1]
+                                    group_stage["$group"][alias] = {
+                                        "$sum": {"$multiply": [f"${field1}", f"${field2}"]}
+                                    }
+                                    logger.info(f"SUM con multiplicación configurado: {field1} * {field2}")
+                                else:
+                                    # Más de 2 campos - manejo básico
+                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                            
+                            elif '+' in inner_expression:
+                                # SUM(campo1 + campo2)
+                                parts = [p.strip() for p in inner_expression.split('+')]
+                                if len(parts) == 2:
+                                    field1 = parts[0]
+                                    field2 = parts[1]
+                                    group_stage["$group"][alias] = {
+                                        "$sum": {"$add": [f"${field1}", f"${field2}"]}
+                                    }
+                                    logger.info(f"SUM con suma configurado: {field1} + {field2}")
+                                else:
+                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                            
+                            elif '-' in inner_expression:
+                                # SUM(campo1 - campo2)
+                                parts = [p.strip() for p in inner_expression.split('-')]
+                                if len(parts) == 2:
+                                    field1 = parts[0]
+                                    field2 = parts[1]
+                                    group_stage["$group"][alias] = {
+                                        "$sum": {"$subtract": [f"${field1}", f"${field2}"]}
+                                    }
+                                    logger.info(f"SUM con resta configurado: {field1} - {field2}")
+                                else:
+                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                            
+                            else:
+                                # SUM(campo) simple
+                                if inner_expression != "*":
+                                    group_stage["$group"][alias] = {"$sum": f"${inner_expression}"}
+                                else:
+                                    group_stage["$group"][alias] = {"$sum": 1}
+                                
+                            logger.info(f"SUM({inner_expression}) configurado con alias '{alias}'")
+
+                    elif "AVG(" in field_upper:
+                        match = regex.search(r'AVG\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            group_stage["$group"][alias] = {"$avg": f"${inner_field}"}
+                    
+                    elif "MIN(" in field_upper:
+                        match = regex.search(r'MIN\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            group_stage["$group"][alias] = {"$min": f"${inner_field}"}
+                    
+                    elif "MAX(" in field_upper:
+                        match = regex.search(r'MAX\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                        if match:
+                            inner_field = match.group(1).strip()
+                            group_stage["$group"][alias] = {"$max": f"${inner_field}"}
             
-            logger.info(f"📊 Etapa $group generada: {group_stage}")
+            logger.info(f" Etapa $group generada: {group_stage}")
         
         return group_stage
 
@@ -499,25 +601,38 @@ class SQLToMongoDBTranslator:
         """
         ✅ CORREGIDO: Construye la etapa $project para agregaciones.
         """
-        functions = self.sql_parser.get_functions()
-        aggregate_functions = []
+        select_fields = self.sql_parser.get_select_fields()
         
-        if functions:
-            aggregate_function_names = ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'GROUP_CONCAT']
-            aggregate_functions = [f for f in functions if f.get('function_name', '').upper() in aggregate_function_names]
+        if not select_fields:
+            return None
         
-        if aggregate_functions:
+        # Verificar si hay funciones de agregación
+        has_aggregation = False
+        
+        for field_info in select_fields:
+            if isinstance(field_info, dict) and "field" in field_info:
+                field = field_info["field"].upper().strip()
+                
+                if field == "COUNT(*)" or any(func in field for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
+                    has_aggregation = True
+                    break
+        
+        if has_aggregation:
             project_stage = {"$project": {"_id": 0}}  # Ocultar _id
             
-            for func in aggregate_functions:
-                alias = func.get('alias', f"{func.get('function_name', '').lower()}_result")
-                project_stage["$project"][alias] = 1
-                logger.info(f"📋 Proyectando agregación: {alias}")
+            for field_info in select_fields:
+                if isinstance(field_info, dict) and "field" in field_info:
+                    field = field_info["field"]
+                    alias = field_info.get("alias", "count_all")
+                    
+                    # Para funciones de agregación, proyectar el alias
+                    if field.upper().strip() == "COUNT(*)" or any(func in field.upper() for func in ["COUNT(", "SUM(", "AVG(", "MIN(", "MAX("]):
+                        project_stage["$project"][alias] = 1
+                        logger.info(f" Proyectando agregación: {alias}")
             
             return project_stage
         
         return None
-
 
     def _build_project_stage_for_joins(self, joins):
         """
@@ -573,26 +688,111 @@ class SQLToMongoDBTranslator:
         
         return project_stage
     
+
     def _has_sql_functions_in_field(self, field):
         """
-        Verifica si un campo contiene funciones SQL.
-        
-        Args:
-            field (str): Campo a verificar
-            
-        Returns:
-            bool: True si contiene funciones SQL
+        🔧 CORREGIDO: Verifica si un campo contiene funciones SQL.
+        Distingue entre funciones de agregación y funciones de transformación.
         """
-        function_parser = self.sql_parser._get_function_parser()
-        if function_parser:
-            return function_parser.has_functions(field)
+        if not field:
+            return False
         
-        # Fallback: verificación básica
-        sql_functions = ["UPPER", "LOWER", "LENGTH", "CONCAT", "YEAR", "MONTH", "DAY", "NOW", "COUNT", "SUM", "AVG", "MIN", "MAX"]
-        field_upper = field.upper()
-        return any(f"{func}(" in field_upper for func in sql_functions)
-    
-    # =================== MÉTODOS EXISTENTES (sin cambios) ===================
+        field_upper = field.upper().strip()
+        
+        # 🆕 DETECTAR COUNT(*) específicamente
+        if field_upper == "COUNT(*)":
+            logger.info("COUNT(*) detectado")
+            return True
+        
+        # 🆕 Lista de funciones de AGREGACIÓN (requieren $group)
+        aggregate_functions = [
+            "COUNT(", "SUM(", "AVG(", "MIN(", "MAX(", 
+            "GROUP_CONCAT(", "STRING_AGG("
+        ]
+        
+        # 🆕 Lista de funciones de TRANSFORMACIÓN (requieren $project, NO $group)
+        transformation_functions = [
+            "UPPER(", "LOWER(", "LENGTH(", "CONCAT(", 
+            "YEAR(", "MONTH(", "DAY(", "NOW(", "CURRENT_DATE(",
+            "SUBSTRING(", "SUBSTR(", "LEFT(", "RIGHT(",
+            "LTRIM(", "RTRIM(", "TRIM(", "REPLACE("
+        ]
+        
+        # 🔧 CRÍTICO: Solo detectar funciones de AGREGACIÓN para _translate_select_aggregate
+        for func in aggregate_functions:
+            if func in field_upper:
+                logger.info(f"Función de AGREGACIÓN detectada: {func} en '{field}'")
+                return True
+        
+        # 🔧 NUEVO: Las funciones de transformación NO van a aggregate
+        for func in transformation_functions:
+            if func in field_upper:
+                logger.info(f"Función de TRANSFORMACIÓN detectada: {func} en '{field}' - usando find con projection especial")
+                return False  # ← CRÍTICO: retornar False para funciones de transformación
+        
+        return False
+
+
+    def _translate_select_with_transformations(self):
+        """
+        🆕 NUEVO: Traduce SELECT con funciones de transformación usando $project
+        """
+        pipeline = []
+        collection = self.sql_parser.get_table_name()
+        
+        # 1. $match para WHERE
+        where_clause = self.sql_parser.get_where_clause()
+        if where_clause:
+            pipeline.append({"$match": where_clause})
+        
+        # 2. $project para transformaciones
+        select_fields = self.sql_parser.get_select_fields()
+        project_stage = {"$project": {}}
+        
+        for field_info in select_fields:
+            if isinstance(field_info, dict) and "field" in field_info:
+                field = field_info["field"]
+                alias = field_info.get("alias", field)
+                
+                # Detectar y traducir funciones de transformación
+                if "UPPER(" in field.upper():
+                    # UPPER(campo) -> {$toUpper: "$campo"}
+                    match = regex.search(r'UPPER\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                    if match:
+                        inner_field = match.group(1).strip()
+                        project_stage["$project"][alias] = {"$toUpper": f"${inner_field}"}
+                        logger.info(f"UPPER({inner_field}) traducido a $toUpper")
+                
+                elif "LOWER(" in field.upper():
+                    # LOWER(campo) -> {$toLower: "$campo"}
+                    match = regex.search(r'LOWER\s*\(\s*([^)]+)\s*\)', field, regex.IGNORECASE)
+                    if match:
+                        inner_field = match.group(1).strip()
+                        project_stage["$project"][alias] = {"$toLower": f"${inner_field}"}
+                        logger.info(f"LOWER({inner_field}) traducido a $toLower")
+                
+                else:
+                    # Campo normal
+                    project_stage["$project"][alias] = f"${field}"
+        
+        if project_stage["$project"]:
+            pipeline.append(project_stage)
+        
+        # 3. ORDER BY y LIMIT
+        order_by = self.sql_parser.get_order_by()
+        if order_by:
+            pipeline.append({"$sort": order_by})
+        
+        limit = self.sql_parser.get_limit()
+        if limit is not None:
+            pipeline.append({"$limit": limit})
+        
+        return {
+            "operation": "aggregate",
+            "collection": collection,
+            "pipeline": pipeline
+        }
+
     
     def translate_insert(self):
         """
